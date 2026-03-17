@@ -119,8 +119,47 @@ function processarFormulario(e) {
         return;
     }
 
-    // A linha recém-inserida pelo Forms é trazida no evento, ou fallback p/ última
-    const newRow = (e && e.range) ? e.range.getRow() : sheet.getLastRow();
+    // --- ROTEADOR DINÂMICO ---
+    // A linha original inserida pelo Forms pode estar em uma aba gerérica ("Respostas do formulário 1")
+    const sourceSheet = (e && e.range) ? e.range.getSheet() : null;
+    let newRow;
+
+    if (sourceSheet && sourceSheet.getName() !== sheet.getName()) {
+        // Obter cabeçalhos da aba destino para mapeamento posicional preciso
+        const targetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+        
+        const newRowData = targetHeaders.map(headerName => {
+            if (!headerName) return '';
+            const headerStr = headerName.toString().trim();
+            
+            // 1. Extração direta das perguntas do Forms
+            if (namedValues[headerStr] && namedValues[headerStr].length > 0) {
+                return namedValues[headerStr][0];
+            }
+            
+            // 2. Fallbacks de infraestrutura
+            // Se for a coluna de Data configurada (ex: 'Data')
+            if (headerStr === appConfig.config.headers.timestamp) {
+                if (namedValues['Carimbo de data/hora']) return namedValues['Carimbo de data/hora'][0];
+                if (e.values && e.values.length > 0) return e.values[0]; // Fallback do Forms
+                return new Date(); // Fallback do sistema
+            }
+            
+            // Se for a coluna de Status, já injeta feedback imediato
+            if (headerStr === appConfig.config.headers.status) {
+                return 'Processando...';
+            }
+            
+            return '';
+        });
+        
+        sheet.appendRow(newRowData);
+        newRow = sheet.getLastRow();
+        logger.info('processarFormulario', `Roteador: formulário único roteado para aba ${sheet.getName()} na linha ${newRow}`);
+    } else {
+        // Fallback: Modo formulário legado (2 forms diretos) ou execução manual
+        newRow = (e && e.range) ? e.range.getRow() : sheet.getLastRow();
+    }
 
     lockManager.withLock(
         () => orchestrator.processNewContact(e, tipo, sheet, newRow),

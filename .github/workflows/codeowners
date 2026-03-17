@@ -6,10 +6,10 @@
 # Revisão obrigatória para arquivos críticos
 
 # Qualquer mudança requer revisão do owner
-*                    @seu-usuario-github
+*                    @claudioalejandroramirez
 
 # Mudanças nos workflows exigem revisão explícita
-.github/workflows/   @seu-usuario-github
+.github/workflows/   @claudioalejandroramirez
 
 # Configuração do GAS
-appsscript.json      @seu-usuario-github
+appsscript.json      @claudioalejandroramirez

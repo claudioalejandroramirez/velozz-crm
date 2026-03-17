@@ -22,48 +22,48 @@
  * comunicação operador → sistema.
  */
 class ContactService {
-    /**
+  /**
      * @param {AppConfig} appConfig - Instância de configuração do tenant
      * @param {Logger} logger - Instância do logger
      * @param {Object} [peopleAPI] - Injetado para testes (padrão: People)
      * @param {Object} [propertiesService] - Injetado para testes
      */
-    constructor(appConfig, logger, peopleAPI, propertiesService) {
-        this._config = appConfig;
-        this._logger = logger;
-        this._people = peopleAPI || People;
-        this._userProps = propertiesService ||
+  constructor(appConfig, logger, peopleAPI, propertiesService) {
+    this._config = appConfig;
+    this._logger = logger;
+    this._people = peopleAPI || People;
+    this._userProps = propertiesService ||
             PropertiesService.getUserProperties();
-    }
+  }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SEÇÃO 1: OPERAÇÕES CRUD DE CONTATO
-    // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // SEÇÃO 1: OPERAÇÕES CRUD DE CONTATO
+  // ─────────────────────────────────────────────────────────────────────────
 
-    /**
+  /**
      * Cria um novo contato no Google Contacts.
      * @param {Object} payload - Corpo da requisição (montado por FormService)
-     * @returns {Object} Contato criado (inclui resourceName e etag)
+     * @return {Object} Contato criado (inclui resourceName e etag)
      * @throws {Error} Se a API retornar erro
      */
-    create(payload) {
-        return this._people.People.createContact(payload);
-    }
+  create(payload) {
+    return this._people.People.createContact(payload);
+  }
 
-    /**
+  /**
      * Busca um contato pelo resourceName com campos específicos.
      * @param {string} resourceName - ID do contato (ex: "people/c123")
      * @param {string} [fields] - Campos desejados (padrão: todos os usados)
-     * @returns {Object} Contato completo
+     * @return {Object} Contato completo
      */
-    get(resourceName, fields) {
-        return this._people.People.get(resourceName, {
-            personFields: fields ||
+  get(resourceName, fields) {
+    return this._people.People.get(resourceName, {
+      personFields: fields ||
                 'names,emailAddresses,phoneNumbers,organizations,addresses,biographies',
-        });
-    }
+    });
+  }
 
-    /**
+  /**
      * Atualiza um contato existente. Requer etag para controle de concorrência.
      *
      * ⚠️ GAS RUNTIME: se o contato foi editado no Contacts entre o get()
@@ -73,37 +73,37 @@ class ContactService {
      * @param {Object} payload - Corpo com etag e campos a atualizar
      * @param {string} resourceName - ID do contato
      * @param {string} updateFields - Campos a persistir (ex: 'names,emailAddresses')
-     * @returns {Object} Contato atualizado
+     * @return {Object} Contato atualizado
      */
-    update(payload, resourceName, updateFields) {
-        return this._people.People.updateContact(payload, resourceName, {
-            updatePersonFields: updateFields ||
+  update(payload, resourceName, updateFields) {
+    return this._people.People.updateContact(payload, resourceName, {
+      updatePersonFields: updateFields ||
                 'names,emailAddresses,phoneNumbers,organizations,addresses,biographies',
-        });
-    }
+    });
+  }
 
-    /**
+  /**
      * Atualiza apenas o campo biography de um contato (patch leve).
      * Usado para padronizar o DOC após correção do operador.
      *
      * @param {string} resourceName - ID do contato
      * @param {string} etag - ETag atual do contato
      * @param {string} biographyValue - Novo valor do campo de notas
-     * @returns {Object} Contato atualizado
+     * @return {Object} Contato atualizado
      */
-    updateBiography(resourceName, etag, biographyValue) {
-        return this._people.People.updateContact(
-            { etag, biographies: [{ value: biographyValue }] },
-            resourceName,
-            { updatePersonFields: 'biographies' }
-        );
-    }
+  updateBiography(resourceName, etag, biographyValue) {
+    return this._people.People.updateContact(
+        {etag, biographies: [{value: biographyValue}]},
+        resourceName,
+        {updatePersonFields: 'biographies'},
+    );
+  }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SEÇÃO 2: SYNC TOKEN (Contacts → Planilha)
-    // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // SEÇÃO 2: SYNC TOKEN (Contacts → Planilha)
+  // ─────────────────────────────────────────────────────────────────────────
 
-    /**
+  /**
      * Busca contatos alterados desde o último sync usando o sync token.
      * Na primeira execução (sem token), apenas gera e persiste o token.
      *
@@ -112,103 +112,103 @@ class ContactService {
      * ContactService.getModifiedContacts() retorna todos — o chamador
      * deve filtrar apenas os que têm resourceName na planilha.
      *
-     * @returns {SyncResult}
+     * @return {SyncResult}
      */
-    getModifiedContacts() {
-        const syncToken = this._userProps.getProperty('VELOZZ_CONTACTS_SYNC_TOKEN');
+  getModifiedContacts() {
+    const syncToken = this._userProps.getProperty('VELOZZ_CONTACTS_SYNC_TOKEN');
 
-        const params = {
-            personFields: 'biographies,names,phoneNumbers,emailAddresses',
-            requestSyncToken: true,
-        };
-        if (syncToken) params.syncToken = syncToken;
+    const params = {
+      personFields: 'biographies,names,phoneNumbers,emailAddresses',
+      requestSyncToken: true,
+    };
+    if (syncToken) params.syncToken = syncToken;
 
-        const response = this._people.People.Connections.list('people/me', params);
+    const response = this._people.People.Connections.list('people/me', params);
 
-        // Persiste o novo token para o próximo ciclo
-        if (response.nextSyncToken) {
-            this._userProps.setProperty(
-                'VELOZZ_CONTACTS_SYNC_TOKEN',
-                response.nextSyncToken
-            );
-        }
-
-        const isFirstRun = !syncToken;
-        if (isFirstRun) {
-            this._logger.info(
-                'ContactService.getModifiedContacts',
-                'Primeira execução: Sync Token gerado. ' +
-                'Próximas alterações no Contacts serão capturadas.'
-            );
-        }
-
-        return {
-            isFirstRun,
-            connections: response.connections || [],
-            nextSyncToken: response.nextSyncToken || null,
-        };
+    // Persiste o novo token para o próximo ciclo
+    if (response.nextSyncToken) {
+      this._userProps.setProperty(
+          'VELOZZ_CONTACTS_SYNC_TOKEN',
+          response.nextSyncToken,
+      );
     }
 
-    /**
+    const isFirstRun = !syncToken;
+    if (isFirstRun) {
+      this._logger.info(
+          'ContactService.getModifiedContacts',
+          'Primeira execução: Sync Token gerado. ' +
+                'Próximas alterações no Contacts serão capturadas.',
+      );
+    }
+
+    return {
+      isFirstRun,
+      connections: response.connections || [],
+      nextSyncToken: response.nextSyncToken || null,
+    };
+  }
+
+  /**
      * Reseta o sync token (útil para reprocessar todos os contatos).
      * Expõe via menu "⚙️ Flex Velozz" para suporte.
      * 💡 ROADMAP: adicionar ao setupTenant como opção avançada.
      */
-    resetSyncToken() {
-        this._userProps.deleteProperty('VELOZZ_CONTACTS_SYNC_TOKEN');
-        this._logger.info(
-            'ContactService.resetSyncToken',
-            'Sync Token resetado. Próxima execução gerará novo token.'
-        );
-    }
+  resetSyncToken() {
+    this._userProps.deleteProperty('VELOZZ_CONTACTS_SYNC_TOKEN');
+    this._logger.info(
+        'ContactService.resetSyncToken',
+        'Sync Token resetado. Próxima execução gerará novo token.',
+    );
+  }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // SEÇÃO 3: HELPERS DE EXTRAÇÃO DE CAMPOS
-    // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // SEÇÃO 3: HELPERS DE EXTRAÇÃO DE CAMPOS
+  // ─────────────────────────────────────────────────────────────────────────
 
-    /**
+  /**
      * Extrai o número de telefone de um objeto contato (apenas dígitos).
      * @param {Object} contact - Objeto retornado pela People API
-     * @returns {string} Apenas dígitos, ou string vazia
+     * @return {string} Apenas dígitos, ou string vazia
      */
-    extractPhone(contact) {
-        return (contact.phoneNumbers && contact.phoneNumbers[0])
-            ? contact.phoneNumbers[0].value.replace(/\D/g, '')
-            : '';
-    }
+  extractPhone(contact) {
+    return (contact.phoneNumbers && contact.phoneNumbers[0]) ?
+            contact.phoneNumbers[0].value.replace(/\D/g, '') :
+            '';
+  }
 
-    /**
+  /**
      * Extrai o e-mail de um objeto contato (normalizado lowercase).
      * @param {Object} contact - Objeto retornado pela People API
-     * @returns {string} Email normalizado, ou string vazia
+     * @return {string} Email normalizado, ou string vazia
      */
-    extractEmail(contact) {
-        return (contact.emailAddresses && contact.emailAddresses[0])
-            ? contact.emailAddresses[0].value.toLowerCase().trim()
-            : '';
-    }
+  extractEmail(contact) {
+    return (contact.emailAddresses && contact.emailAddresses[0]) ?
+            contact.emailAddresses[0].value.toLowerCase().trim() :
+            '';
+  }
 
-    /**
+  /**
      * Extrai o nome completo de um objeto contato.
      * @param {Object} contact - Objeto retornado pela People API
-     * @returns {string}
+     * @return {string}
      */
-    extractFullName(contact) {
-        if (!contact.names || !contact.names[0]) return 'Desconhecido';
-        const { givenName = '', familyName = '' } = contact.names[0];
-        return `${givenName} ${familyName}`.trim();
-    }
+  extractFullName(contact) {
+    if (!contact.names || !contact.names[0]) return 'Desconhecido';
+    const {givenName = '', familyName = ''} = contact.names[0];
+    return `${givenName} ${familyName}`.trim();
+  }
 
-    /**
+  /**
      * Extrai o valor do campo biography (notas) de um contato.
      * @param {Object} contact - Objeto retornado pela People API
-     * @returns {string}
+     * @return {string}
      */
-    extractBiography(contact) {
-        return (contact.biographies && contact.biographies[0])
-            ? (contact.biographies[0].value || '').trim()
-            : '';
-    }
+  extractBiography(contact) {
+    return (contact.biographies && contact.biographies[0]) ?
+            (contact.biographies[0].value || '').trim() :
+            '';
+  }
 }
 
 /**

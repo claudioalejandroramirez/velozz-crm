@@ -1,0 +1,15 @@
+---
+
+### `.github/CODEOWNERS`
+```
+# ── Velozz CRM — Code Owners ─────────────────────────────────────────────────
+# Revisão obrigatória para arquivos críticos
+
+# Qualquer mudança requer revisão do owner
+*                    @seu-usuario-github
+
+# Mudanças nos workflows exigem revisão explícita
+.github/workflows/   @seu-usuario-github
+
+# Configuração do GAS
+appsscript.json      @seu-usuario-github

@@ -1,0 +1,35 @@
+{
+    "extends": [
+        "google"
+    ],
+    "env": {
+        "es2020": true,
+        "node": true,
+        "jest": true
+    },
+    "parserOptions": {
+        "ecmaVersion": 2020
+    },
+    "rules": {
+        "max-len": [
+            "warn",
+            {
+                "code": 100
+            }
+        ],
+        "require-jsdoc": [
+            "warn",
+            {
+                "require": {
+                    "FunctionDeclaration": true,
+                    "MethodDefinition": true,
+                    "ClassDeclaration": true
+                }
+            }
+        ],
+        "valid-jsdoc": "warn",
+        "no-unused-vars": "warn",
+        "prefer-const": "error",
+        "no-var": "error"
+    }
+}

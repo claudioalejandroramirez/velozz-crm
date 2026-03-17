@@ -1,0 +1,39 @@
+# ── Velozz CRM — .claspignore ────────────────────────────────────────────────
+# O clasp faz push APENAS da pasta dist/.
+# Tudo abaixo é ignorado — o bundle.js cuida de gerar dist/.
+
+# Código fonte (processado pelo bundle.js → dist/)
+src/
+tests/
+scripts/
+
+# Configuração local e CI
+.github/
+.eslintrc.json
+jest.config.js
+package.json
+package-lock.json
+node_modules/
+
+# Documentação
+README.md
+CHANGELOG.md
+LICENSE
+
+# Arquivos de ambiente (NUNCA versionar)
+.env
+.env.*
+.clasprc.json
+
+# Build artifacts que não são do GAS
+dist/bundle-manifest.json
+
+# OS e editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore

@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velozz CRM — Configuração</title>
+    <style>
+        /* ── Reset e Base ──────────────────────────────────────────────── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --velozz-primary: #1a73e8;
+            --velozz-success: #1e8e3e;
+            --velozz-warning: #f29900;
+            --velozz-danger: #d93025;
+            --velozz-surface: #ffffff;
+            --velozz-bg: #f8f9fa;
+            --velozz-border: #dadce0;
+            --velozz-text: #202124;
+            --velozz-muted: #5f6368;
+            --velozz-radius: 8px;
+            --velozz-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 1px 2px rgba(0, 0, 0, .08);
+        }
+
+        body {
+            font-family: 'Google Sans', Roboto, Arial, sans-serif;
+            font-size: 14px;
+            color: var(--velozz-text);
+            background: var(--velozz-bg);
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        /* ── Header ────────────────────────────────────────────────────── */
+        .header {
+            background: var(--velozz-primary);
+            color: #fff;
+            padding: 20px 24px 16px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .header-top {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+
+        .header-logo {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -.5px;
+        }
+
+        .header-badge {
+            background: rgba(255, 255, 255, .2);
+            border-radius: 12px;
+            padding: 2px 10px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .header-subtitle {
+            font-size: 12px;
+            opacity: .85;
+        }
+
+        /* ── Layout ────────────────────────────────────────────────────── */
+        .container {
+            padding: 20px 24px 100px;
+            max-width: 640px;
+        }
+
+        /* ── Seções ────────────────────────────────────────────────────── */
+        .section {
+            background: var(--velozz-surface);
+            border: 1px solid var(--velozz-border);
+            border-radius: var(--velozz-radius);
+            margin-bottom: 16px;
+            overflow: hidden;
+            box-shadow: var(--velozz-shadow);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 16px 12px;
+            border-bottom: 1px solid var(--velozz-border);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .section-header:hover {
+            background: #f1f3f4;
+        }
+
+        .section-icon {
+            font-size: 18px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            flex: 1;
+        }
+
+        .section-chevron {
+            color: var(--velozz-muted);
+            transition: transform .2s;
+            font-size: 18px;
+        }
+
+        .section-chevron.open {
+            transform: rotate(180deg);
+        }
+
+        .section-body {
+            padding: 16px;
+            display: none;
+        }
+
+        .section-body.open {
+            display: block;
+        }
+
+        /* ── Campos ────────────────────────────────────────────────────── */
+        .field {
+            margin-bottom: 14px;
+        }
+
+        .field:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--velozz-muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: .4px;
+        }
+
+        label .required {
+            color: var(--velozz-danger);
+            margin-left: 2px;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="number"] {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1.5px solid var(--velozz-border);
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--velozz-text);
+            background: #fff;
+            transition: border-color .15s;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: var(--velozz-primary);
+        }
+
+        input.error {
+            border-color: var(--velozz-danger);
+        }
+
+        input.success {
+            border-color: var(--velozz-success);
+        }
+
+        .field-hint {
+            font-size: 11px;
+            color: var(--velozz-muted);
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+
+        .field-error {
+            font-size: 11px;
+            color: var(--velozz-danger);
+            margin-top: 4px;
+            display: none;
+        }
+
+        /* ── Grid de 2 colunas ─────────────────────────────────────────── */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        /* ── Banner informativo Forms ──────────────────────────────────── */
+        .forms-info {
+            background: #e8f0fe;
+            border: 1px solid #c5d9fb;
+            border-radius: 6px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .forms-info-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .forms-info-text {
+            font-size: 12px;
+            color: #1a56a0;
+            line-height: 1.5;
+        }
+
+        .forms-info-text strong {
+            display: block;
+            margin-bottom: 3px;
+            font-size: 13px;
+        }
+
+        /* ── Resultado da verificação ──────────────────────────────────── */
+        #verification-result {
+            display: none;
+            border-radius: 6px;
+            padding: 12px 14px;
+            margin-top: 16px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        #verification-result.success {
+            background: #e6f4ea;
+            border: 1px solid #a8d5b5;
+            color: #1e6e35;
+            display: block;
+        }
+
+        #verification-result.warning {
+            background: #fef7e0;
+            border: 1px solid #f5d97e;
+            color: #7a4f00;
+            display: block;
+        }
+
+        #verification-result.error {
+            background: #fce8e6;
+            border: 1px solid #f5b7b1;
+            color: #8c1a14;
+            display: block;
+        }
+
+        #verification-result .result-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+
+        #verification-result ul {
+            padding-left: 16px;
+            margin-top: 4px;
+        }
+
+        #verification-result li {
+            margin-bottom: 2px;
+        }
+
+        /* ── Footer fixo ───────────────────────────────────────────────── */
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--velozz-surface);
+            border-top: 1px solid var(--velozz-border);
+            padding: 12px 24px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            align-items: center;
+        }
+
+        /* ── Botões ────────────────────────────────────────────────────── */
+        .btn {
+            padding: 9px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all .15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1.5px solid var(--velozz-border);
+            color: var(--velozz-text);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--velozz-bg);
+        }
+
+        .btn-check {
+            background: #fff;
+            border: 1.5px solid var(--velozz-primary);
+            color: var(--velozz-primary);
+        }
+
+        .btn-check:hover:not(:disabled) {
+            background: #e8f0fe;
+        }
+
+        .btn-primary {
+            background: var(--velozz-primary);
+            color: #fff;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #1557b0;
+        }
+
+        /* ── Spinner ───────────────────────────────────────────────────── */
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            display: none;
+        }
+
+        .spinner.visible {
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── Tenant ID ─────────────────────────────────────────────────── */
+        .tenant-id-box {
+            display: none;
+            background: #f1f3f4;
+            border-radius: 6px;
+            padding: 10px 14px;
+            margin-top: 12px;
+            font-size: 12px;
+            color: var(--velozz-muted);
+        }
+
+        .tenant-id-box .tid {
+            font-family: monospace;
+            font-size: 13px;
+            color: var(--velozz-text);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ── Header ──────────────────────────────────────────────────────────── -->
+    <div class="header">
+        <div class="header-top">
+            <span class="header-logo">⚡ Velozz CRM</span>
+            <span class="header-badge">Setup</span>
+        </div>
+        <div class="header-subtitle">
+            Configure sua instância · Google Forms + Sheets + Contacts
+        </div>
+    </div>
+
+    <div class="container">
+
+        <!-- ── Banner Google Forms ─────────────────────────────────────────── -->
+        <div class="forms-info">
+            <span class="forms-info-icon">📋</span>
+            <div class="forms-info-text">
+                <strong>Antes de continuar: configure seus Google Forms</strong>
+                O Velozz CRM não cria formulários automaticamente — ele se adapta
+                aos seus. Crie dois formulários (PF e PJ), vincule cada um à aba
+                correta da planilha e confirme que os nomes das perguntas batem
+                com os campos configurados abaixo.
+                <br><br>
+                <strong>Como vincular:</strong> Formulário → Respostas →
+                <em>Selecionar planilha de destino</em> → escolha a aba correta.
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- SEÇÃO 1: IDENTIDADE                                               -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <span class="section-icon">🏢</span>
+                <span class="section-title">Identidade da Empresa</span>
+                <span class="section-chevron open">▾</span>
+            </div>
+            <div class="section-body open">
+
+                <div class="field">
+                    <label>Nome da empresa <span class="required">*</span></label>
+                    <input type="text" id="COMPANY_NAME" placeholder="Ex: Acme Ltda" oninput="validateRequired(this)">
+                    <div class="field-error" id="err-COMPANY_NAME">Campo obrigatório</div>
+                </div>
+
+                <div class="field">
+                    <label>Nome da planilha</label>
+                    <input type="text" id="SPREADSHEET_NAME" placeholder="Ex: Cadastro de Clientes Acme">
+                    <div class="field-hint">
+                        Apenas para documentação — não altera o nome real da planilha.
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label>E-mail de alertas <span class="required">*</span></label>
+                    <input type="email" id="ALERT_EMAIL" placeholder="Ex: financeiro@acme.com.br"
+                        oninput="validateEmail(this)">
+                    <div class="field-error" id="err-ALERT_EMAIL">
+                        Insira um e-mail válido
+                    </div>
+                    <div class="field-hint">
+                        Recebe notificações de CPF/CNPJ inválidos e falhas de sync.
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- SEÇÃO 2: ESTRUTURA DAS ABAS E FORMULÁRIOS                         -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <span class="section-icon">📊</span>
+                <span class="section-title">Estrutura das Abas e Formulários</span>
+                <span class="section-chevron">▾</span>
+            </div>
+            <div class="section-body">
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Nome da aba PF <span class="required">*</span></label>
+                        <input type="text" id="SHEET_PF" placeholder="PF" oninput="validateRequired(this)">
+                        <div class="field-error" id="err-SHEET_PF">Campo obrigatório</div>
+                        <div class="field-hint">Aba de destino do Formulário PF</div>
+                    </div>
+                    <div class="field">
+                        <label>Nome da aba PJ <span class="required">*</span></label>
+                        <input type="text" id="SHEET_PJ" placeholder="PJ" oninput="validateRequired(this)">
+                        <div class="field-error" id="err-SHEET_PJ">Campo obrigatório</div>
+                        <div class="field-hint">Aba de destino do Formulário PJ</div>
+                    </div>
+                </div>
+
+                <hr style="border:none;border-top:1px solid var(--velozz-border);margin:14px 0">
+
+                <p style="font-size:12px;color:var(--velozz-muted);margin-bottom:12px;">
+                    <strong>Mapeamento de colunas</strong> — nomes das perguntas no formulário.
+                    Devem ser idênticos aos cabeçalhos da planilha.
+                </p>
+
+                <!-- Colunas comuns -->
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Coluna Timestamp</label>
+                        <input type="text" id="COL_TIMESTAMP" placeholder="Data">
+                        <div class="field-hint">⚠️ Inserida automaticamente pelo Forms</div>
+                    </div>
+                    <div class="field">
+                        <label>Coluna Tipo de Pessoa</label>
+                        <input type="text" id="COL_TIPO_PESSOA" placeholder="Tipo">
+                        <div class="field-hint">Pergunta de roteamento PF/PJ</div>
+                    </div>
+                    <div class="field">
+                        <label>Nome (PF)</label>
+                        <input type="text" id="COL_NOME_PF" placeholder="Nome">
+                    </div>
+                    <div class="field">
+                        <label>Sobrenome (PF)</label>
+                        <input type="text" id="COL_SOBRENOME_PF" placeholder="Sobrenome">
+                    </div>
+                    <div class="field">
+                        <label>CPF</label>
+                        <input type="text" id="COL_DOC_PF" placeholder="CPF">
+                    </div>
+                    <div class="field">
+                        <label>Nome Responsável (PJ)</label>
+                        <input type="text" id="COL_NOME_RESPONSAVEL" placeholder="Nome Responsável">
+                    </div>
+                    <div class="field">
+                        <label>Empresa (PJ)</label>
+                        <input type="text" id="COL_EMPRESA" placeholder="Empresa">
+                    </div>
+                    <div class="field">
+                        <label>CNPJ</label>
+                        <input type="text" id="COL_DOC_PJ" placeholder="CNPJ">
+                    </div>
+                    <div class="field">
+                        <label>Endereço</label>
+                        <input type="text" id="COL_ENDERECO" placeholder="Endereço">
+                    </div>
+                    <div class="field">
+                        <label>Número</label>
+                        <input type="text" id="COL_NUMERO" placeholder="Número">
+                    </div>
+                    <div class="field">
+                        <label>Complemento</label>
+                        <input type="text" id="COL_COMPLEMENTO" placeholder="Complemento">
+                    </div>
+                    <div class="field">
+                        <label>Telefone</label>
+                        <input type="text" id="COL_TELEFONE" placeholder="Telefone">
+                    </div>
+                    <div class="field">
+                        <label>Email</label>
+                        <input type="text" id="COL_EMAIL" placeholder="Email">
+                    </div>
+                </div>
+
+                <hr style="border:none;border-top:1px solid var(--velozz-border);margin:14px 0">
+
+                <p style="font-size:12px;color:var(--velozz-muted);margin-bottom:12px;">
+                    <strong>Colunas do sistema</strong> — adicionadas pelo script à direita
+                    das respostas do Forms. Não existem no formulário.
+                </p>
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Coluna Status</label>
+                        <input type="text" id="COL_STATUS" placeholder="Status">
+                    </div>
+                    <div class="field">
+                        <label>Coluna ResourceName</label>
+                        <input type="text" id="COL_RESOURCE" placeholder="ResourceName">
+                        <div class="field-hint">Será ocultada automaticamente</div>
+                    </div>
+                    <div class="field">
+                        <label>Coluna Última Atualização</label>
+                        <input type="text" id="COL_SYNC" placeholder="Última Atualização">
+                        <div class="field-hint">Será ocultada automaticamente</div>
+                    </div>
+                </div>
+
+                <!-- Resultado da verificação de compatibilidade -->
+                <div id="verification-result"></div>
+
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <!-- SEÇÃO 3: COMPORTAMENTO                                            -->
+        <!-- ══════════════════════════════════════════════════════════════════ -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <span class="section-icon">⚙️</span>
+                <span class="section-title">Comportamento do Sistema</span>
+                <span class="section-chevron">▾</span>
+            </div>
+            <div class="section-body">
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Expiração de tags (dias)</label>
+                        <input type="number" id="TAG_EXPIRY_DAYS" min="1" max="365" placeholder="30">
+                        <div class="field-hint">
+                            Tags "novo-telefone" e "novo-email" expiram após este período.
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Timeout de lock (ms)</label>
+                        <input type="number" id="LOCK_TIMEOUT_MS" min="1000" max="30000" placeholder="10000">
+                        <div class="field-hint">
+                            Tempo máximo de espera para processar formulários simultâneos.
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Hora do sync diário</label>
+                        <input type="number" id="SYNC_HOUR" min="0" max="23" placeholder="3">
+                        <div class="field-hint">
+                            Hora (0–23) para limpeza automática de tags expiradas.
+                        </div>
+                    </div>
+                </div>
+
+                <hr style="border:none;border-top:1px solid var(--velozz-border);margin:14px 0">
+
+                <p style="font-size:12px;color:var(--velozz-muted);margin-bottom:12px;">
+                    <strong>Nomes das tags no Google Contacts</strong>
+                </p>
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Tag de alerta (DOC inválido)</label>
+                        <input type="text" id="TAG_ALERT_NAME" placeholder="revisar">
+                    </div>
+                    <div class="field">
+                        <label>Tag de telefone novo</label>
+                        <input type="text" id="TAG_PHONE_NAME" placeholder="novo-telefone">
+                    </div>
+                    <div class="field">
+                        <label>Tag de e-mail novo</label>
+                        <input type="text" id="TAG_EMAIL_NAME" placeholder="novo-email">
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Tenant ID (exibido após salvar) -->
+        <div class="tenant-id-box" id="tenant-id-box">
+            🔑 Tenant ID: <span class="tid" id="tenant-id-value">—</span>
+            <div style="margin-top:4px;font-size:11px;">
+                Guarde este ID para suporte técnico e rastreamento de licença.
+            </div>
+        </div>
+
+    </div><!-- /container -->
+
+    <!-- ── Footer fixo ─────────────────────────────────────────────────────── -->
+    <div class="footer">
+        <button class="btn btn-secondary" onclick="google.script.host.close()">
+            Cancelar
+        </button>
+        <button class="btn btn-check" id="btn-verify" onclick="verifyCompatibility()">
+            <span class="spinner" id="spin-verify"></span>
+            🔍 Verificar Compatibilidade
+        </button>
+        <button class="btn btn-primary" id="btn-save" onclick="saveConfig()" disabled
+            title="Verifique a compatibilidade antes de salvar">
+            <span class="spinner" id="spin-save"></span>
+            💾 Salvar Configurações
+        </button>
+    </div>
+
+    <script>
+        // ── Estado do formulário ──────────────────────────────────────────────
+        let verificationPassed = false;
+
+        // ── Carrega valores atuais ao abrir ───────────────────────────────────
+        window.addEventListener('load', () => {
+            google.script.run
+                .withSuccessHandler(populateForm)
+                .withFailureHandler(err => console.error('Load error:', err))
+                .getTenantConfig();
+        });
+
+        /**
+         * Preenche o formulário com os valores atuais do tenant.
+         * @param {Object} config - Mapa chave/valor das configurações atuais
+         */
+        function populateForm(config) {
+            if (!config) return;
+            Object.keys(config).forEach(key => {
+                const el = document.getElementById(key);
+                if (el && config[key]) el.value = config[key];
+            });
+        }
+
+        // ── Accordion ─────────────────────────────────────────────────────────
+        function toggleSection(header) {
+            const body = header.nextElementSibling;
+            const chevron = header.querySelector('.section-chevron');
+            const isOpen = body.classList.contains('open');
+            body.classList.toggle('open', !isOpen);
+            chevron.classList.toggle('open', !isOpen);
+        }
+
+        // ── Validação inline ──────────────────────────────────────────────────
+        function validateRequired(input) {
+            const errEl = document.getElementById('err-' + input.id);
+            const empty = !input.value.trim();
+            input.classList.toggle('error', empty);
+            if (errEl) errEl.style.display = empty ? 'block' : 'none';
+            resetVerification();
+            return !empty;
+        }
+
+        function validateEmail(input) {
+            const errEl = document.getElementById('err-' + input.id);
+            const valid = !input.value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.value);
+            input.classList.toggle('error', !valid);
+            if (errEl) errEl.style.display = valid ? 'none' : 'block';
+            resetVerification();
+            return valid;
+        }
+
+        function resetVerification() {
+            verificationPassed = false;
+            document.getElementById('btn-save').disabled = true;
+            document.getElementById('btn-save').title =
+                'Verifique a compatibilidade antes de salvar';
+            const res = document.getElementById('verification-result');
+            res.style.display = 'none';
+            res.className = '';
+        }
+
+        // ── Coleta valores do formulário ──────────────────────────────────────
+        function collectValues() {
+            const fields = [
+                'COMPANY_NAME', 'SPREADSHEET_NAME', 'ALERT_EMAIL',
+                'SHEET_PF', 'SHEET_PJ',
+                'COL_TIMESTAMP', 'COL_TIPO_PESSOA',
+                'COL_NOME_PF', 'COL_SOBRENOME_PF', 'COL_DOC_PF',
+                'COL_NOME_RESPONSAVEL', 'COL_EMPRESA', 'COL_DOC_PJ',
+                'COL_ENDERECO', 'COL_NUMERO', 'COL_COMPLEMENTO',
+                'COL_TELEFONE', 'COL_EMAIL',
+                'COL_STATUS', 'COL_RESOURCE', 'COL_SYNC',
+                'TAG_EXPIRY_DAYS', 'LOCK_TIMEOUT_MS', 'SYNC_HOUR',
+                'TAG_ALERT_NAME', 'TAG_PHONE_NAME', 'TAG_EMAIL_NAME',
+            ];
+            const values = {};
+            fields.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) values[id] = el.value.trim();
+            });
+            return values;
+        }
+
+        // ── Verificação de compatibilidade ────────────────────────────────────
+        function verifyCompatibility() {
+            // Valida campos obrigatórios primeiro
+            const requiredIds = ['COMPANY_NAME', 'ALERT_EMAIL', 'SHEET_PF', 'SHEET_PJ'];
+            let allValid = true;
+            requiredIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (id === 'ALERT_EMAIL') { if (!validateEmail(el)) allValid = false; }
+                else { if (!validateRequired(el)) allValid = false; }
+            });
+            if (!allValid) {
+                showResult('error', '❌ Campos obrigatórios',
+                    ['Preencha todos os campos marcados com * antes de verificar.']);
+                return;
+            }
+
+            setLoading('verify', true);
+            const values = collectValues();
+
+            google.script.run
+                .withSuccessHandler(result => {
+                    setLoading('verify', false);
+                    handleVerificationResult(result);
+                })
+                .withFailureHandler(err => {
+                    setLoading('verify', false);
+                    showResult('error', '❌ Erro ao verificar',
+                        [`Erro interno: ${err.message}`]);
+                })
+                .verifyTenantCompatibility(values);
+        }
+
+        /**
+         * Processa o resultado da verificação vindo do servidor GAS.
+         * @param {{ valid: boolean, errors: string[], warnings: string[],
+         *           found: string[] }} result
+         */
+        function handleVerificationResult(result) {
+            if (result.valid) {
+                const lines = result.found.map(f => `✓ ${f}`);
+                if (result.warnings && result.warnings.length) {
+                    result.warnings.forEach(w => lines.push(`⚠️ ${w}`));
+                    showResult('warning', '⚠️ Compatível com avisos', lines);
+                } else {
+                    showResult('success', '✅ Estrutura compatível!', lines);
+                }
+                verificationPassed = true;
+                const btn = document.getElementById('btn-save');
+                btn.disabled = false;
+                btn.title = '';
+            } else {
+                const lines = [
+                    ...result.errors.map(e => `✗ ${e}`),
+                    ...(result.warnings || []).map(w => `⚠️ ${w}`),
+                ];
+                showResult('error', '❌ Estrutura incompatível', lines);
+                verificationPassed = false;
+            }
+        }
+
+        // ── Salvar configurações ──────────────────────────────────────────────
+        function saveConfig() {
+            if (!verificationPassed) return;
+
+            setLoading('save', true);
+            const values = collectValues();
+
+            google.script.run
+                .withSuccessHandler(result => {
+                    setLoading('save', false);
+                    if (result.success) {
+                        document.getElementById('tenant-id-value').textContent =
+                            result.tenantId || '—';
+                        document.getElementById('tenant-id-box').style.display = 'block';
+                        showResult('success',
+                            '✅ Configurações salvas!',
+                            [
+                                'Tenant configurado com sucesso.',
+                                'Execute "Setup Inicial" pelo menu para aplicar proteções.',
+                                `Tenant ID: ${result.tenantId || '—'}`,
+                            ]
+                        );
+                        // Desabilita o botão salvar após sucesso (evita re-submit acidental)
+                        document.getElementById('btn-save').disabled = true;
+                    } else {
+                        showResult('error', '❌ Erro ao salvar',
+                            [result.message || 'Erro desconhecido.']);
+                    }
+                })
+                .withFailureHandler(err => {
+                    setLoading('save', false);
+                    showResult('error', '❌ Erro ao salvar',
+                        [`Erro interno: ${err.message}`]);
+                })
+                .saveTenantConfig(values);
+        }
+
+        // ── Helpers de UI ─────────────────────────────────────────────────────
+        function showResult(type, title, lines) {
+            const el = document.getElementById('verification-result');
+            // Abre a seção de abas se estiver fechada
+            const section = el.closest('.section-body');
+            if (section && !section.classList.contains('open')) {
+                section.classList.add('open');
+                section.previousElementSibling
+                    .querySelector('.section-chevron').classList.add('open');
+            }
+            el.className = type;
+            el.innerHTML =
+                `<div class="result-title">${title}</div>` +
+                `<ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul>`;
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function setLoading(btn, loading) {
+            const spinner = document.getElementById(`spin-${btn}`);
+            const button = document.getElementById(`btn-${btn}`);
+            spinner.classList.toggle('visible', loading);
+            button.disabled = loading;
+        }
+    </script>
+</body>
+
+</html>

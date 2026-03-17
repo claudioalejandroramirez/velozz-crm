@@ -1,0 +1,27 @@
+# ── Velozz CRM — .gitignore ──────────────────────────────────────────────────
+
+# Dependências
+node_modules/
+
+# Build
+dist/
+
+# Credenciais GAS — NUNCA versionar
+.clasprc.json
+.env
+.env.*
+
+# Cobertura de testes
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Logs locais
+*.log
+npm-debug.log*

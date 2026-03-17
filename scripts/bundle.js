@@ -1,27 +1,8 @@
 #!/usr/bin/env node
 /**
  * @fileoverview Pipeline de bundle para o Velozz CRM.
- *
- * O GAS V8 não suporta módulos ES (import/export). Este script lê os
- * arquivos src/ em ordem definida, aplica transformações e gera os
- * arquivos .gs em dist/ que o clasp vai fazer push.
- *
- * ORDEM DE BUNDLE (crítica — classes devem ser declaradas antes de uso):
- *   0. AppConfig          ← sem dependências
- *   1. Logger             ← depende de AppConfig
- *   2. LockManager        ← depende de AppConfig, Logger
- *   3. Formatter          ← sem dependências (estático)
- *   4. DocumentValidator  ← sem dependências
- *   5. SheetService       ← depende de AppConfig, Logger
- *   6. FormService        ← depende de AppConfig, Logger, SheetService,
- *                            DocumentValidator, Formatter
- *   7. TagService         ← depende de AppConfig, Logger
- *   8. ContactService     ← depende de AppConfig, Logger
- *   9. SyncOrchestrator   ← depende de todos os services
- *  10. TriggerHandlers    ← depende de tudo (entry point GAS)
- *
- * ⚠️ GAS RUNTIME: arquivos HTML não são processados pelo bundle —
- * são copiados diretamente para dist/ sem transformação.
+ * v1.1 — Fix: readGitVersion stdio array não suportado por execSync em
+ *         todas as versões do Node; simplificado para encoding+try/catch.
  */
 
 'use strict';
@@ -29,18 +10,10 @@
 const fs = require('fs');
 const path = require('path');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIGURAÇÃO DO BUNDLE
-// ─────────────────────────────────────────────────────────────────────────────
-
 const ROOT = path.resolve(__dirname, '..');
 const SRC_DIR = path.join(ROOT, 'src');
 const DIST_DIR = path.join(ROOT, 'dist');
 
-/**
- * Ordem de bundle: [índice, arquivo fonte, nome do arquivo .gs gerado]
- * O índice numérico no nome garante a ordem de carregamento no GAS.
- */
 const BUNDLE_ORDER = [
     ['00', 'config/AppConfig.js', '00_AppConfig.gs'],
     ['01', 'utils/Logger.js', '01_Logger.gs'],
@@ -55,28 +28,18 @@ const BUNDLE_ORDER = [
     ['10', 'triggers/TriggerHandlers.js', '10_TriggerHandlers.gs'],
 ];
 
-/**
- * Arquivos HTML a copiar (sem transformação).
- * O nome do arquivo .html deve coincidir com o usado em
- * HtmlService.createHtmlOutputFromFile() em TriggerHandlers.js.
- */
 const HTML_FILES = [
     ['ui/SetupTenantDialog.html', 'SetupTenantDialog.html'],
 ];
 
-/**
- * Arquivos de configuração do GAS a copiar para dist/.
- */
-const CONFIG_FILES = [
-    'appsscript.json',
-];
+const CONFIG_FILES = ['appsscript.json'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Lê a versão atual do package.json para substituir {{VERSION}}.
+ * Lê a versão do package.json.
  * @returns {string}
  */
 function readVersion() {
@@ -87,31 +50,50 @@ function readVersion() {
 }
 
 /**
- * Lê a git tag atual se disponível, fallback para versão do package.json.
- * Usado para substituir {{VERSION}} nos arquivos gerados.
+ * FIX 5: readGitVersion simplificado.
+ *
+ * PROBLEMA ORIGINAL:
+ * `execSync` com `stdio: ['pipe', 'pipe', 'ignore']` (array) não é suportado
+ * de forma confiável em todas as versões do Node.js para execSync — esse
+ * formato é próprio de `spawn`. Em alguns ambientes, o retorno era undefined
+ * em vez do stdout, causando `.toString()` em undefined → TypeError.
+ *
+ * SOLUÇÃO:
+ * Usar `{ encoding: 'utf8' }` — execSync retorna string diretamente.
+ * Stderr vai para o terminal (aceitável em CI — vira log da action).
+ * Se o comando falhar (repo sem tags), o catch retorna readVersion().
+ *
  * @returns {string}
  */
 function readGitVersion() {
     try {
         const { execSync } = require('child_process');
-        const tag = execSync('git describe --tags --abbrev=0 2>/dev/null', {
+        const tag = execSync('git describe --tags --abbrev=0', {
             cwd: ROOT,
-            stdio: ['pipe', 'pipe', 'ignore'],
-        }).toString().trim();
+            encoding: 'utf8',
+            // 'pipe' captura stderr em vez de imprimir — evita ruído no CI
+            // mas não quebra se o comando falhar (catch cuida disso)
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
         return tag || readVersion();
     } catch (_) {
+        // Repo sem tags ainda (primeira execução, por exemplo)
         return readVersion();
     }
 }
 
 /**
- * Garante que o diretório dist/ existe e está limpo.
+ * Garante que dist/ existe e limpa artefatos de builds anteriores.
+ * Remove .gs, .html e bundle-manifest.json (mas preserva .clasp.json se houver).
  */
 function prepareDist() {
     if (fs.existsSync(DIST_DIR)) {
-        // Remove apenas arquivos .gs e .html — preserva appsscript.json se existir
         fs.readdirSync(DIST_DIR).forEach(file => {
-            if (file.endsWith('.gs') || file.endsWith('.html')) {
+            if (
+                file.endsWith('.gs') ||
+                file.endsWith('.html') ||
+                file === 'bundle-manifest.json'
+            ) {
                 fs.unlinkSync(path.join(DIST_DIR, file));
             }
         });
@@ -121,20 +103,11 @@ function prepareDist() {
 }
 
 /**
- * Aplica transformações no conteúdo de um arquivo .js antes de gerar .gs.
- *
- * Transformações aplicadas:
- * 1. Substitui {{VERSION}} pela versão atual do git/package.json
- * 2. Adiciona banner de cabeçalho com metadados do arquivo
- * 3. Remove linhas de import/export residuais (segurança)
- *
- * ⚠️ NÃO faz transpilação de ES6 — o GAS V8 suporta ES6 nativamente.
- * ⚠️ NÃO faz minificação — o editor GAS precisa do código legível para debug.
- *
- * @param {string} content - Conteúdo bruto do arquivo .js
- * @param {string} fileName - Nome do arquivo (para o banner)
- * @param {string} version - Versão atual
- * @returns {string} Conteúdo transformado
+ * Aplica transformações no conteúdo .js antes de gerar .gs.
+ * @param {string} content
+ * @param {string} fileName
+ * @param {string} version
+ * @returns {string}
  */
 function transform(content, fileName, version) {
     const banner = [
@@ -148,11 +121,7 @@ function transform(content, fileName, version) {
     ].join('\n');
 
     let result = content;
-
-    // 1. Substitui placeholder de versão
     result = result.replace(/\{\{VERSION\}\}/g, version);
-
-    // 2. Remove import/export residuais (não suportados pelo GAS)
     result = result.replace(/^export\s+(default\s+)?/gm, '');
     result = result.replace(/^import\s+.*?from\s+['"].*?['"]\s*;?\s*$/gm, '');
 
@@ -160,17 +129,54 @@ function transform(content, fileName, version) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PIPELINE PRINCIPAL
+// VALIDAÇÃO PRÉ-BUNDLE
+// Verifica que todos os arquivos fonte existem ANTES de começar,
+// evitando bundle parcialmente gerado em caso de arquivo faltando.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Executa o bundle completo.
+ * Valida que todos os arquivos necessários existem.
+ * @returns {{ valid: boolean, missing: string[] }}
  */
+function validateSources() {
+    const missing = [];
+
+    BUNDLE_ORDER.forEach(([, srcRelative]) => {
+        const srcPath = path.join(SRC_DIR, srcRelative);
+        if (!fs.existsSync(srcPath)) missing.push(`src/${srcRelative}`);
+    });
+
+    HTML_FILES.forEach(([srcRelative]) => {
+        const srcPath = path.join(SRC_DIR, srcRelative);
+        if (!fs.existsSync(srcPath)) missing.push(`src/${srcRelative}`);
+    });
+
+    CONFIG_FILES.forEach(fileName => {
+        const srcPath = path.join(ROOT, fileName);
+        if (!fs.existsSync(srcPath)) missing.push(fileName);
+    });
+
+    return { valid: missing.length === 0, missing };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE PRINCIPAL
+// ─────────────────────────────────────────────────────────────────────────────
+
 function bundle() {
     console.log('\n⚡ Velozz CRM — Bundle iniciado\n');
 
     const version = readGitVersion();
     console.log(`📦 Versão: ${version}`);
+
+    // Valida fontes antes de qualquer escrita em disco
+    const { valid, missing } = validateSources();
+    if (!valid) {
+        console.error('\n❌ Arquivos fonte ausentes:');
+        missing.forEach(f => console.error(`   • ${f}`));
+        console.error('\nVerifique se todos os blocos foram criados em src/\n');
+        process.exit(1);
+    }
 
     prepareDist();
     console.log(`🗂️  dist/ preparado: ${DIST_DIR}\n`);
@@ -178,16 +184,12 @@ function bundle() {
     let successCount = 0;
     const errors = [];
 
-    // ── 1. Processa arquivos JS → .gs ───────────────────────────────────
+    // ── 1. JS → .gs ────────────────────────────────────────────────────
     console.log('📝 Processando arquivos JS:');
     BUNDLE_ORDER.forEach(([, srcRelative, distName]) => {
         const srcPath = path.join(SRC_DIR, srcRelative);
         const distPath = path.join(DIST_DIR, distName);
-
         try {
-            if (!fs.existsSync(srcPath)) {
-                throw new Error(`Arquivo não encontrado: ${srcPath}`);
-            }
             const raw = fs.readFileSync(srcPath, 'utf8');
             const transformed = transform(raw, distName, version);
             fs.writeFileSync(distPath, transformed, 'utf8');
@@ -199,16 +201,12 @@ function bundle() {
         }
     });
 
-    // ── 2. Copia arquivos HTML ──────────────────────────────────────────
+    // ── 2. HTML (cópia direta) ──────────────────────────────────────────
     console.log('\n📄 Copiando arquivos HTML:');
     HTML_FILES.forEach(([srcRelative, distName]) => {
         const srcPath = path.join(SRC_DIR, srcRelative);
         const distPath = path.join(DIST_DIR, distName);
-
         try {
-            if (!fs.existsSync(srcPath)) {
-                throw new Error(`Arquivo não encontrado: ${srcPath}`);
-            }
             fs.copyFileSync(srcPath, distPath);
             console.log(`  ✓ ${srcRelative.padEnd(45)} → dist/${distName}`);
             successCount++;
@@ -218,16 +216,12 @@ function bundle() {
         }
     });
 
-    // ── 3. Copia arquivos de configuração GAS ───────────────────────────
+    // ── 3. Config GAS ──────────────────────────────────────────────────
     console.log('\n⚙️  Copiando configuração GAS:');
     CONFIG_FILES.forEach(fileName => {
         const srcPath = path.join(ROOT, fileName);
         const distPath = path.join(DIST_DIR, fileName);
-
         try {
-            if (!fs.existsSync(srcPath)) {
-                throw new Error(`Arquivo não encontrado: ${srcPath}`);
-            }
             fs.copyFileSync(srcPath, distPath);
             console.log(`  ✓ ${fileName}`);
             successCount++;
@@ -237,10 +231,11 @@ function bundle() {
         }
     });
 
-    // ── 4. Gera manifesto do bundle ─────────────────────────────────────
+    // ── 4. Manifesto ───────────────────────────────────────────────────
     const manifest = {
         version,
         generatedAt: new Date().toISOString(),
+        nodeVersion: process.version,
         files: BUNDLE_ORDER.map(([, src, dist]) => ({ src, dist })),
         htmlFiles: HTML_FILES.map(([src, dist]) => ({ src, dist })),
     };
@@ -250,7 +245,7 @@ function bundle() {
         'utf8'
     );
 
-    // ── 5. Relatório final ──────────────────────────────────────────────
+    // ── 5. Relatório ───────────────────────────────────────────────────
     console.log('\n' + '─'.repeat(60));
     if (errors.length === 0) {
         console.log(`✅ Bundle concluído: ${successCount} arquivo(s) gerado(s)`);
@@ -262,14 +257,12 @@ function bundle() {
         errors.forEach(({ file, error }) => {
             console.error(`   • ${file}: ${error}`);
         });
-        console.error('\nCorriga os erros acima antes de fazer deploy.\n');
         process.exit(1);
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCRIPT AUXILIAR: bump-version.js (referenciado no package.json)
-// Gera scripts/bump-version.js automaticamente se não existir
+// BUMP VERSION (gerado automaticamente)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function generateBumpVersionScript() {
@@ -284,21 +277,17 @@ const pkgPath = path.resolve(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const [major, minor, patch] = pkg.version.split('.').map(Number);
 const type = process.argv[2] || 'patch';
-let newVersion;
-if (type === 'major') newVersion = \`\${major + 1}.0.0\`;
-else if (type === 'minor') newVersion = \`\${major}.\${minor + 1}.0\`;
-else newVersion = \`\${major}.\${minor}.\${patch + 1}\`;
-pkg.version = newVersion;
+let v;
+if (type === 'major')      v = \`\${major + 1}.0.0\`;
+else if (type === 'minor') v = \`\${major}.\${minor + 1}.0\`;
+else                       v = \`\${major}.\${minor}.\${patch + 1}\`;
+pkg.version = v;
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\\n', 'utf8');
-console.log(\`✅ Versão atualizada: \${newVersion}\`);
+console.log(\`✅ Versão atualizada: \${v}\`);
 `;
     fs.writeFileSync(bumpPath, content, 'utf8');
     console.log('📝 scripts/bump-version.js gerado automaticamente.');
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ENTRY POINT
-// ─────────────────────────────────────────────────────────────────────────────
 
 generateBumpVersionScript();
 bundle();

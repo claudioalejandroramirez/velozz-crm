@@ -1,0 +1,198 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Velozz CRM — PR Check
+# Valida pull requests antes de permitir merge na main.
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".eslintrc.json"
+      - "jest.config.js"
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Lint
+  # ────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: 🔍 Lint (ESLint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar ESLint
+        run: npm run lint
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Testes unitários
+  # ────────────────────────────────────────────────────────────────────────────
+  test:
+    name: 🧪 Testes Unitários (Jest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar testes com cobertura
+        run: npm run test:coverage
+
+      - name: Upload do relatório de cobertura
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-pr-${{ github.event.pull_request.number }}
+          path: coverage/
+          retention-days: 7
+
+      - name: Verificar cobertura mínima
+        run: |
+          COVERAGE=$(node -e "
+            const r = require('./coverage/coverage-summary.json').total;
+            console.log(Math.min(r.lines.pct, r.functions.pct, r.branches.pct, r.statements.pct).toFixed(1));
+          ")
+          echo "📊 Cobertura mínima: $COVERAGE%"
+          node -e "
+            const c = parseFloat('$COVERAGE');
+            if (c < 80) { console.error('❌ Cobertura abaixo do mínimo de 80%'); process.exit(1); }
+            console.log('✅ Cobertura aceitável');
+          "
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 3: Bundle dry-run
+  # ────────────────────────────────────────────────────────────────────────────
+  bundle-check:
+    name: 📦 Bundle Dry-Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar bundle
+        run: npm run bundle
+
+      - name: Verificar arquivos gerados
+        run: |
+          echo "📁 Arquivos gerados em dist/:"
+          ls -la dist/
+          echo ""
+
+          EXPECTED_FILES=(
+            "00_AppConfig.gs"
+            "01_Logger.gs"
+            "02_LockManager.gs"
+            "03_Formatter.gs"
+            "04_DocumentValidator.gs"
+            "05_SheetService.gs"
+            "06_FormService.gs"
+            "07_TagService.gs"
+            "08_ContactService.gs"
+            "09_SyncOrchestrator.gs"
+            "10_TriggerHandlers.gs"
+            "SetupTenantDialog.html"
+            "appsscript.json"
+          )
+
+          MISSING=0
+          for FILE in "${EXPECTED_FILES[@]}"; do
+            if [ ! -f "dist/$FILE" ]; then
+              echo "❌ Arquivo ausente: dist/$FILE"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✓ dist/$FILE"
+            fi
+          done
+
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "❌ $MISSING arquivo(s) ausente(s) no bundle."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Todos os arquivos gerados com sucesso."
+
+      - name: Upload do bundle (para inspeção)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-pr-${{ github.event.pull_request.number }}
+          path: dist/
+          retention-days: 3
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 4: Status check consolidado
+  # ────────────────────────────────────────────────────────────────────────────
+  pr-status:
+    name: ✅ PR Check — Status Final
+    runs-on: ubuntu-latest
+    needs: [lint, test, bundle-check]
+    if: always()
+
+    steps:
+      - name: Verificar status de todos os jobs
+        run: |
+          LINT_STATUS="${{ needs.lint.result }}"
+          TEST_STATUS="${{ needs.test.result }}"
+          BUNDLE_STATUS="${{ needs.bundle-check.result }}"
+
+          echo "Lint:   $LINT_STATUS"
+          echo "Testes: $TEST_STATUS"
+          echo "Bundle: $BUNDLE_STATUS"
+
+          if [ "$LINT_STATUS" != "success" ] || \
+             [ "$TEST_STATUS" != "success" ] || \
+             [ "$BUNDLE_STATUS" != "success" ]; then
+            echo ""
+            echo "❌ Um ou mais checks falharam. Merge bloqueado."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Todos os checks passaram. PR pronto para merge."

@@ -1,0 +1,22 @@
+# Ignorar diretórios de desenvolvimento
+node_modules/
+src/
+tests/
+scripts/
+.github/
+coverage/
+
+# Ignorar arquivos de configuração local
+.eslintrc.json
+.gitignore
+jest.config.js
+package-lock.json
+README.md
+test_output.txt
+test_output.zip
+
+# Ignorar apenas o que não deve subir para o GAS
+**/*.test.js
+**/*.mock.js
+**/mocks/**
+**/helpers/**

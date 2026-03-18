@@ -1,0 +1,370 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Velozz CRM — Deploy para Produção
+# v2.0 — Adaptado para estrutura modularizada
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "appsscript.json"
+      - "package.json"
+      - ".clasp.json"
+
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Forçar deploy mesmo sem mudanças de código"
+        required: false
+        default: "false"
+        type: boolean
+      skip_tests:
+        description: "Pular testes (emergência — use com cuidado)"
+        required: false
+        default: "false"
+        type: boolean
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Qualidade — Lint + Testes
+  # ────────────────────────────────────────────────────────────────────────────
+  quality:
+    name: "🔍 Qualidade (Lint + Testes)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    if: ${{ inputs.skip_tests != 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes com cobertura
+        run: npm run test:coverage
+
+      - name: Verificar cobertura mínima
+        run: |
+          COVERAGE=$(node -e "
+            const r = require('./coverage/coverage-summary.json').total;
+            console.log(Math.min(r.lines.pct, r.functions.pct, r.branches.pct, r.statements.pct).toFixed(1));
+          ")
+          echo "📊 Cobertura mínima: $COVERAGE%"
+          node -e "
+            const c = parseFloat('$COVERAGE');
+            if (c < 80) { console.error('❌ Cobertura abaixo do mínimo de 80%'); process.exit(1); }
+            console.log('✅ Cobertura aceitável');
+          "
+
+      - name: Upload cobertura
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage/
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Bundle
+  # ────────────────────────────────────────────────────────────────────────────
+  bundle:
+    name: "📦 Bundle"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: quality
+    if: always() && (needs.quality.result == 'success' || needs.quality.result == 'skipped')
+
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Obter versão atual
+        id: get-version
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || \
+                    node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Versão do bundle: $VERSION"
+
+      - name: Executar bundle
+        run: npm run bundle
+
+      - name: Validar bundle gerado
+        run: |
+          EXPECTED=(
+            "00_AppConfig.gs" "01_Logger.gs" "02_LockManager.gs"
+            "03_Formatter.gs" "04_DocumentValidator.gs" "05_SheetService.gs"
+            "06_FormService.gs" "07_TagService.gs" "08_ContactService.gs"
+            "09_SyncOrchestrator.gs" "10_TriggerHandlers.gs"
+            "SetupTenantDialog.html" "appsscript.json"
+          )
+          MISSING=0
+          for FILE in "${EXPECTED[@]}"; do
+            if [ ! -f "dist/$FILE" ]; then
+              echo "❌ Ausente: dist/$FILE"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✓ dist/$FILE"
+            fi
+          done
+          [ $MISSING -gt 0 ] && exit 1 || echo "✅ Bundle válido."
+
+      - name: Upload do bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ github.sha }}
+          path: dist/
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 3: Deploy
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: "🚀 Deploy → Google Apps Script"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: bundle
+    environment:
+      name: production
+      url: "https://script.google.com/d/${{ secrets.SCRIPT_ID }}/edit"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Download do bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle-${{ github.sha }}
+          path: dist/
+
+      - name: Configurar credenciais clasp
+        run: |
+          echo '${{ secrets.CLASP_TOKEN }}' > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+          echo "✅ Credenciais clasp configuradas"
+
+      - name: Configurar .clasp.json
+        run: |
+          cat > .clasp.json << EOF
+          {
+            "scriptId": "${{ secrets.SCRIPT_ID }}",
+            "rootDir": "dist"
+          }
+          EOF
+          echo "✅ .clasp.json configurado"
+
+      - name: Snapshot — Salvar versão atual do GAS
+        id: snapshot
+        run: |
+          SNAPSHOT_DESC="Pre-deploy snapshot — $(date -u '+%Y-%m-%d %H:%M:%S UTC') — SHA: ${{ github.sha }}"
+          echo "📸 Criando snapshot: $SNAPSHOT_DESC"
+          VERSION_OUTPUT=$(npx clasp version "$SNAPSHOT_DESC" 2>&1) || true
+          echo "Snapshot output: $VERSION_OUTPUT"
+          VERSION_NUM=$(echo "$VERSION_OUTPUT" | grep -oP '(?<=Created version )\d+' || echo "0")
+          echo "snapshot_version=$VERSION_NUM" >> $GITHUB_OUTPUT
+          echo "📸 Snapshot criado: versão $VERSION_NUM"
+
+      - name: Deploy — clasp push
+        id: clasp-push
+        run: |
+          echo "🚀 Iniciando deploy para Script ID: ${{ secrets.SCRIPT_ID }}"
+          echo "📦 Versão: ${{ needs.bundle.outputs.version }}"
+          npx clasp push --force
+          echo "✅ clasp push concluído com sucesso"
+
+      - name: Smoke Test — Verificar deploy via clasp (não bloqueante)
+        id: smoke-test
+        run: |
+          echo "🔬 Executando smoke test (informativo, não bloqueante)..."
+          SMOKE_RESULT=$(npx clasp run 'onOpen' 2>&1 || echo "SKIPPED - função onOpen pode não ser executável via API")
+          echo "Resultado: $SMOKE_RESULT"
+          exit 0
+
+      - name: Versionar deployment no GAS
+        run: |
+          VERSION_DESC="v${{ needs.bundle.outputs.version }} — $(date -u '+%Y-%m-%d %H:%M:%S UTC') — SHA: ${{ github.sha }}"
+          npx clasp version "$VERSION_DESC" || true
+          echo "📌 Versão GAS criada: $VERSION_DESC"
+
+      - name: Criar tag git do deploy
+        run: |
+          TAG="deploy-$(date -u '+%Y%m%d%H%M%S')"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Deploy ${{ needs.bundle.outputs.version }} — ${{ github.sha }}"
+          git push origin "$TAG"
+          echo "🏷️  Tag criada: $TAG"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 4: Rollback automático
+  # ────────────────────────────────────────────────────────────────────────────
+  rollback:
+    name: "⏪ Rollback Automático"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: deploy
+    if: failure() && needs.deploy.result == 'failure'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Configurar credenciais clasp
+        run: |
+          echo '${{ secrets.CLASP_TOKEN }}' > ~/.clasprc.json
+          chmod 600 ~/.clasprc.json
+
+      - name: Configurar .clasp.json
+        run: |
+          cat > .clasp.json << EOF
+          {
+            "scriptId": "${{ secrets.SCRIPT_ID }}",
+            "rootDir": "dist"
+          }
+          EOF
+
+      - name: Executar rollback para última versão estável
+        run: |
+          echo "⏪ Iniciando rollback automático..."
+          VERSIONS=$(npx clasp versions 2>&1)
+          echo "Versões disponíveis:"
+          echo "$VERSIONS"
+
+          ROLLBACK_VERSION=$(echo "$VERSIONS" | \
+            grep "Pre-deploy" | \
+            tail -1 | \
+            grep -oP '^\d+' || echo "")
+
+          if [ -z "$ROLLBACK_VERSION" ] || [ "$ROLLBACK_VERSION" = "0" ]; then
+            echo "⚠️ Nenhuma versão de snapshot encontrada. Rollback manual necessário."
+            exit 1
+          fi
+
+          echo "🔄 Fazendo rollback para versão GAS: $ROLLBACK_VERSION"
+          npx clasp deploy \
+            --versionNumber "$ROLLBACK_VERSION" \
+            --description "ROLLBACK automático — falha em ${{ github.sha }}"
+          echo "✅ Rollback concluído para versão $ROLLBACK_VERSION"
+
+      - name: Notificar rollback
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.ALERT_EMAIL }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "⏪ [Velozz CRM] Rollback executado — ${{ github.sha }}"
+          to: ${{ secrets.ALERT_EMAIL }}
+          body: |
+            ⏪ ROLLBACK AUTOMÁTICO EXECUTADO
+
+            O deploy falhou e o rollback foi ativado automaticamente.
+
+            Detalhes:
+            • SHA do commit: ${{ github.sha }}
+            • Branch: ${{ github.ref_name }}
+            • Autor: ${{ github.actor }}
+            • Horário: ${{ github.event.head_commit.timestamp }}
+
+            Verifique os logs completos em:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            — Velozz CRM CI/CD
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JOB 5: Notificação de sucesso
+  # ────────────────────────────────────────────────────────────────────────────
+  notify-success:
+    name: "📬 Notificar Sucesso"
+    runs-on: ubuntu-latest
+    needs: [deploy, bundle]
+    if: success()
+
+    steps:
+      - name: Notificar deploy bem-sucedido
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.ALERT_EMAIL }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "✅ [Velozz CRM] Deploy concluído — v${{ needs.bundle.outputs.version }}"
+          to: ${{ secrets.ALERT_EMAIL }}
+          body: |
+            ✅ DEPLOY CONCLUÍDO COM SUCESSO
+
+            Velozz CRM foi atualizado em produção.
+
+            Detalhes:
+            • Versão: v${{ needs.bundle.outputs.version }}
+            • SHA: ${{ github.sha }}
+            • Branch: ${{ github.ref_name }}
+            • Autor: ${{ github.actor }}
+            • Horário: ${{ github.event.head_commit.timestamp }}
+
+            Acesse o projeto GAS:
+            https://script.google.com/d/${{ secrets.SCRIPT_ID }}/edit
+
+            Logs do pipeline:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            — Velozz CRM CI/CD

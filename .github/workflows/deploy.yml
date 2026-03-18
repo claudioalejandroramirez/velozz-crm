@@ -21,12 +21,12 @@ on:
       force_deploy:
         description: "Forçar deploy mesmo sem mudanças de código"
         required: false
-        default: "false"
+        default: false
         type: boolean
       skip_tests:
         description: "Pular testes (emergência — use com cuidado)"
         required: false
-        default: "false"
+        default: false
         type: boolean
 
 concurrency:
@@ -164,7 +164,7 @@ jobs:
     needs: bundle
     environment:
       name: production
-      url: "https://script.google.com/d/${{ SCRIPT_ID }}/edit"
+      #url: "https://script.google.com/d/${{ secrets.SCRIPT_ID }}/edit"
 
     steps:
       - name: Checkout

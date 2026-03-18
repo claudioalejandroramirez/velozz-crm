@@ -26,7 +26,7 @@ class TagService {
     const dados = JSON.stringify({
       resourceName: resourceName,
       tagName: tagName,
-      expiry: Date.now() + (this._config.getTagExpiryDays() * 24 * 60 * 60 * 1000)
+      expiry: Date.now() + (this._config.getTagExpiryDays() * 24 * 60 * 60 * 1000),
     });
 
     try {
@@ -41,7 +41,7 @@ class TagService {
     const agora = Date.now();
     let removidas = 0;
 
-    Object.keys(todasPropriedades).forEach(chave => {
+    Object.keys(todasPropriedades).forEach((chave) => {
       if (!chave.startsWith('TAG_EXPIRY_')) return;
 
       try {
@@ -51,7 +51,7 @@ class TagService {
           this._props.deleteProperty(chave);
           removidas++;
           this._logger.info('TagService.limparTagsExpiradas',
-            `Tag expirada removida: "${dados.tagName}" de ${dados.resourceName}`);
+              `Tag expirada removida: "${dados.tagName}" de ${dados.resourceName}`);
         }
       } catch (e) {
         // Entrada malformada, limpar

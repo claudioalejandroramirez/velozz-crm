@@ -4,7 +4,7 @@
 class DocumentValidator {
   validarCPF(cpf) {
     if (!cpf || cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
-    let add = 0, rev;
+    let add = 0; let rev;
     for (let i = 0; i < 9; i++) add += parseInt(cpf.charAt(i)) * (10 - i);
     rev = 11 - (add % 11);
     if (rev === 10 || rev === 11) rev = 0;

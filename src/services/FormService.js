@@ -11,7 +11,7 @@ class FormService {
   // Extrai dados do array 'values' do evento onFormSubmit.
   // Lógica idêntica à função 'extrairDadosFormulario' do monolito.
   extrairDadosFormulario(valores, tipo) {
-    const d = { tipo: tipo, isValid: false };
+    const d = {tipo: tipo, isValid: false};
 
     if (tipo === 'Pessoa Física') {
       d.nome = valores[2] || '';
@@ -47,21 +47,21 @@ class FormService {
     const p = {
       names: [{
         givenName: d.nome || '',
-        familyName: d.sobrenome || ''
-      }]
+        familyName: d.sobrenome || '',
+      }],
     };
 
     if (d.email) {
-      p.emailAddresses = [{ value: d.email, type: 'work' }];
+      p.emailAddresses = [{value: d.email, type: 'work'}];
     }
 
     const telFmt = this._formatter.telefone(d.telefoneLimpo);
     if (telFmt) {
-      p.phoneNumbers = [{ value: telFmt, type: 'work' }];
+      p.phoneNumbers = [{value: telFmt, type: 'work'}];
     }
 
     if (d.empresa) {
-      p.organizations = [{ name: d.empresa, type: 'work' }];
+      p.organizations = [{name: d.empresa, type: 'work'}];
     }
 
     let enderecoCompleto = (d.logradouro || '');
@@ -69,14 +69,14 @@ class FormService {
     if (d.complemento) enderecoCompleto += ` - ${d.complemento}`;
 
     if (enderecoCompleto.trim() !== '') {
-      p.addresses = [{ streetAddress: enderecoCompleto.trim(), type: 'work' }];
+      p.addresses = [{streetAddress: enderecoCompleto.trim(), type: 'work'}];
     }
 
     if (d.documentoLimpo && d.docTipo) {
-      const docFormatado = d.isValid
-        ? this._formatter.documento(d.documentoLimpo, d.docTipo)
-        : d.documentoLimpo + ' [INVÁLIDO]';
-      p.biographies = [{ value: `${d.docTipo}: ${docFormatado}` }];
+      const docFormatado = d.isValid ?
+        this._formatter.documento(d.documentoLimpo, d.docTipo) :
+        d.documentoLimpo + ' [INVÁLIDO]';
+      p.biographies = [{value: `${d.docTipo}: ${docFormatado}`}];
     }
 
     return p;

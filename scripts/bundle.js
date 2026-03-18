@@ -44,7 +44,7 @@ const CONFIG_FILES = ['appsscript.json'];
  */
 function readVersion() {
   const pkg = JSON.parse(
-    fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
+      fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
   );
   return pkg.version || '0.0.0';
 }
@@ -55,7 +55,7 @@ function readVersion() {
  */
 function readGitVersion() {
   try {
-    const { execSync } = require('child_process');
+    const {execSync} = require('child_process');
     const tag = execSync('git describe --tags --abbrev=0', {
       cwd: ROOT,
       encoding: 'utf8',
@@ -82,7 +82,7 @@ function prepareDist() {
       }
     });
   } else {
-    fs.mkdirSync(DIST_DIR, { recursive: true });
+    fs.mkdirSync(DIST_DIR, {recursive: true});
   }
 }
 
@@ -94,8 +94,8 @@ function prepareDist() {
 function removeModuleExports(content) {
   // Remove blocos if (typeof module !== 'undefined') { ... }
   return content.replace(
-    /if\s*\(\s*typeof\s+module\s*!==\s*['"]undefined['"]\s*\)\s*\{\s*module\.exports\s*=\s*[^;]+\s*;?\s*\}/g,
-    ''
+      /if\s*\(\s*typeof\s+module\s*!==\s*['"]undefined['"]\s*\)\s*\{\s*module\.exports\s*=\s*[^;]+\s*;?\s*\}/g,
+      '',
   );
 }
 
@@ -154,7 +154,7 @@ function validateSources() {
     if (!fs.existsSync(srcPath)) missing.push(fileName);
   });
 
-  return { valid: missing.length === 0, missing };
+  return {valid: missing.length === 0, missing};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ function bundle() {
   const version = readGitVersion();
   console.log(`📦 Versão: ${version}`);
 
-  const { valid, missing } = validateSources();
+  const {valid, missing} = validateSources();
   if (!valid) {
     console.error('\n❌ Arquivos fonte ausentes:');
     missing.forEach((f) => console.error(`   • ${f}`));
@@ -194,7 +194,7 @@ function bundle() {
       successCount++;
     } catch (err) {
       console.error(`  ✗ ${srcRelative.padEnd(45)} → ERRO: ${err.message}`);
-      errors.push({ file: srcRelative, error: err.message });
+      errors.push({file: srcRelative, error: err.message});
     }
   });
 
@@ -209,7 +209,7 @@ function bundle() {
       successCount++;
     } catch (err) {
       console.error(`  ✗ ${srcRelative.padEnd(45)} → ERRO: ${err.message}`);
-      errors.push({ file: srcRelative, error: err.message });
+      errors.push({file: srcRelative, error: err.message});
     }
   });
 
@@ -224,7 +224,7 @@ function bundle() {
       successCount++;
     } catch (err) {
       console.error(`  ✗ ${fileName} → ERRO: ${err.message}`);
-      errors.push({ file: fileName, error: err.message });
+      errors.push({file: fileName, error: err.message});
     }
   });
 
@@ -233,13 +233,13 @@ function bundle() {
     version,
     generatedAt: new Date().toISOString(),
     nodeVersion: process.version,
-    files: BUNDLE_ORDER.map(([src, dist]) => ({ src, dist })),
-    htmlFiles: HTML_FILES.map(([src, dist]) => ({ src, dist })),
+    files: BUNDLE_ORDER.map(([src, dist]) => ({src, dist})),
+    htmlFiles: HTML_FILES.map(([src, dist]) => ({src, dist})),
   };
   fs.writeFileSync(
-    path.join(DIST_DIR, 'bundle-manifest.json'),
-    JSON.stringify(manifest, null, 2),
-    'utf8',
+      path.join(DIST_DIR, 'bundle-manifest.json'),
+      JSON.stringify(manifest, null, 2),
+      'utf8',
   );
 
   // ── 5. Relatório ───────────────────────────────────────────────────
@@ -251,7 +251,7 @@ function bundle() {
     process.exit(0);
   } else {
     console.error(`\n❌ Bundle com erros: ${errors.length} falha(s)`);
-    errors.forEach(({ file, error }) => {
+    errors.forEach(({file, error}) => {
       console.error(`   • ${file}: ${error}`);
     });
     process.exit(1);

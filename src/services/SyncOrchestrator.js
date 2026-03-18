@@ -34,7 +34,7 @@ class SyncOrchestrator {
         const statusDuplicado = `Duplicado: DOC já cadastrado na linha ${duplicado.linha}`;
         this._sheets.escreverNovaLinha(sheetDestino, dados, tipo, statusDuplicado);
         this._logger.warn('SyncOrchestrator.processarNovoContato',
-          `Duplicado: ${dados.documentoLimpo} já existe na linha ${duplicado.linha}`);
+            `Duplicado: ${dados.documentoLimpo} já existe na linha ${duplicado.linha}`);
         return;
       }
     }
@@ -63,7 +63,7 @@ class SyncOrchestrator {
       this._sheets.setStatus(sheetDestino, novaLinha, statusFinal);
 
       this._logger.info('SyncOrchestrator.processarNovoContato',
-        `Contato criado: ${dados.nome} | DOC: ${dados.documentoLimpo} | Válido: ${dados.isValid}`);
+          `Contato criado: ${dados.nome} | DOC: ${dados.documentoLimpo} | Válido: ${dados.isValid}`);
     } catch (error) {
       this._sheets.setStatus(sheetDestino, novaLinha, 'Erro API: ' + error.message);
       this._logger.error('SyncOrchestrator.processarNovoContato', 'Erro API: ' + error.message);
@@ -98,9 +98,9 @@ class SyncOrchestrator {
       // Reconstrói objeto 'dados' para ter a mesma estrutura do FormService
       const dados = this._reconstruirDadosDeLinha(valoresLinha, tipo);
       dados.documentoLimpo = this._sheets.getDocLinha(sheet, row);
-      dados.isValid = (tipo === 'Pessoa Física')
-        ? this._validator.validarCPF(dados.documentoLimpo)
-        : this._validator.validarCNPJ(dados.documentoLimpo);
+      dados.isValid = (tipo === 'Pessoa Física') ?
+        this._validator.validarCPF(dados.documentoLimpo) :
+        this._validator.validarCNPJ(dados.documentoLimpo);
 
       const statusExtras = [];
 
@@ -110,7 +110,7 @@ class SyncOrchestrator {
         this._tags.aplicarTagTemporaria(resourceName, this._config.getTagNovoTelefone());
         statusExtras.push('📞 novo-telefone');
         this._logger.info('SyncOrchestrator.syncPlanilhaParaContatos',
-          `Telefone alterado linha ${row}: ${telNoContato} → ${dados.telefoneLimpo}`);
+            `Telefone alterado linha ${row}: ${telNoContato} → ${dados.telefoneLimpo}`);
       }
 
       // Detecção de mudança de email
@@ -119,7 +119,7 @@ class SyncOrchestrator {
         this._tags.aplicarTagTemporaria(resourceName, this._config.getTagNovoEmail());
         statusExtras.push('✉️ novo-email');
         this._logger.info('SyncOrchestrator.syncPlanilhaParaContatos',
-          `Email alterado linha ${row}: ${emailNoContato} → ${dados.email}`);
+            `Email alterado linha ${row}: ${emailNoContato} → ${dados.email}`);
       }
 
       // Atualiza contato
@@ -133,13 +133,13 @@ class SyncOrchestrator {
 
       // Atualiza planilha
       this._sheets.setSyncTimestamp(sheet, row);
-      const statusFinal = statusExtras.length > 0
-        ? `Edição Sincronizada (Planilha → Contacts) | ${statusExtras.join(' | ')}`
-        : 'Edição Sincronizada (Planilha → Contacts)';
+      const statusFinal = statusExtras.length > 0 ?
+        `Edição Sincronizada (Planilha → Contacts) | ${statusExtras.join(' | ')}` :
+        'Edição Sincronizada (Planilha → Contacts)';
       this._sheets.setStatus(sheet, row, statusFinal);
 
       this._logger.info('SyncOrchestrator.syncPlanilhaParaContatos',
-        `Linha ${row} sincronizada. ${statusExtras.join(', ')}`);
+          `Linha ${row} sincronizada. ${statusExtras.join(', ')}`);
     } catch (error) {
       this._sheets.setStatus(sheet, row, 'Erro Sync: ' + error.message);
       this._logger.error('SyncOrchestrator.syncPlanilhaParaContatos', `Erro na linha ${row}: ${error.message}`);
@@ -163,8 +163,8 @@ class SyncOrchestrator {
       }
       if (!response.connections || response.connections.length === 0) return 0;
 
-      response.connections.forEach(contato => {
-        const { sheet, row } = this._sheets.encontrarLinhaPorResourceName(contato.resourceName);
+      response.connections.forEach((contato) => {
+        const {sheet, row} = this._sheets.encontrarLinhaPorResourceName(contato.resourceName);
         if (!sheet || !row) return; // Contato não pertence ao sistema
 
         const mudancas = [];
@@ -185,7 +185,7 @@ class SyncOrchestrator {
           this._tags.aplicarTagTemporaria(resourceName, cfg.tagNovoTelefone);
           mudancas.push('📞 Telefone Atualizado');
           this._logger.info('SyncOrchestrator.syncContatosParaPlanilha',
-            `Telefone: ${resourceName} | ${telNaPlanilha} → ${telNoContato}`);
+              `Telefone: ${resourceName} | ${telNaPlanilha} → ${telNoContato}`);
         }
 
         // --- Detectar mudança de Email ---
@@ -196,7 +196,7 @@ class SyncOrchestrator {
           this._tags.aplicarTagTemporaria(resourceName, cfg.tagNovoEmail);
           mudancas.push('✉️ Email Atualizado');
           this._logger.info('SyncOrchestrator.syncContatosParaPlanilha',
-            `Email: ${resourceName} | ${emailNaPlanilha} → ${emailNoContato}`);
+              `Email: ${resourceName} | ${emailNaPlanilha} → ${emailNoContato}`);
         }
 
         if (mudancas.length > 0) {
@@ -205,7 +205,6 @@ class SyncOrchestrator {
           processedCount++;
         }
       });
-
     } catch (error) {
       this._logger.error('SyncOrchestrator.syncContatosParaPlanilha', 'Erro no Sync Reverso: ' + error.message);
     }
@@ -217,7 +216,7 @@ class SyncOrchestrator {
   _reconstruirDadosDeLinha(valoresLinha, tipo) {
     // Esta função é um espelho de extrairDadosFormulario, mas para uma linha da planilha.
     // A ordem dos valoresLinha é: [Data, Nome, (Sobrenome|Empresa), Documento, Endereço, Número, Complemento, Telefone, Email]
-    const dados = { tipo };
+    const dados = {tipo};
     if (tipo === 'Pessoa Física') {
       dados.nome = valoresLinha[1] || '';
       dados.sobrenome = valoresLinha[2] || '';
@@ -246,9 +245,12 @@ class SyncOrchestrator {
 
     // Modo Correção do Operador
     if (!temPrefixo && tamanhoValido) {
-      let tipoDoc = null, isValido = false;
-      if (this._validator.validarCPF(docExtraido)) { tipoDoc = 'CPF'; isValido = true; }
-      else if (this._validator.validarCNPJ(docExtraido)) { tipoDoc = 'CNPJ'; isValido = true; }
+      let tipoDoc = null; let isValido = false;
+      if (this._validator.validarCPF(docExtraido)) {
+        tipoDoc = 'CPF'; isValido = true;
+      } else if (this._validator.validarCNPJ(docExtraido)) {
+        tipoDoc = 'CNPJ'; isValido = true;
+      }
 
       if (isValido) {
         const docFormatado = this._formatter.documento(docExtraido, tipoDoc);
@@ -257,7 +259,7 @@ class SyncOrchestrator {
         this._contacts.removerTag(resourceName, cfg.tagAlerta);
         mudancas.push('✅ Corrigido pelo Operador');
         this._logger.info('SyncOrchestrator._processarBiography',
-          `DOC corrigido pelo operador: ${resourceName} → ${docFormatado}`);
+            `DOC corrigido pelo operador: ${resourceName} → ${docFormatado}`);
       } else {
         const tipoInferido = docExtraido.length === 11 ? 'CPF' : 'CNPJ';
         this._contacts.updateBiography(resourceName, contato.etag, `${tipoInferido}: ${docExtraido} [INVÁLIDO]`);
@@ -267,17 +269,20 @@ class SyncOrchestrator {
           docTipo: tipoInferido,
           documentoLimpo: docExtraido,
           telefoneLimpo: '',
-          email: ''
+          email: '',
         });
         mudancas.push('⚠️ Correção Falhou: DOC ainda inválido');
         this._logger.warn('SyncOrchestrator._processarBiography',
-          `Correção falhou: ${resourceName} → ${docExtraido} inválido`);
+            `Correção falhou: ${resourceName} → ${docExtraido} inválido`);
       }
     } else {
       // Modo Normal: Extrai e valida DOC da biografia formatada
-      let tipoDoc = null, isValido = false;
-      if (this._validator.validarCPF(docExtraido)) { tipoDoc = 'CPF'; isValido = true; }
-      else if (this._validator.validarCNPJ(docExtraido)) { tipoDoc = 'CNPJ'; isValido = true; }
+      let tipoDoc = null; let isValido = false;
+      if (this._validator.validarCPF(docExtraido)) {
+        tipoDoc = 'CPF'; isValido = true;
+      } else if (this._validator.validarCNPJ(docExtraido)) {
+        tipoDoc = 'CNPJ'; isValido = true;
+      }
 
       if (isValido) {
         const docFormatado = this._formatter.documento(docExtraido, tipoDoc);
@@ -286,7 +291,7 @@ class SyncOrchestrator {
         this._contacts.removerTag(resourceName, cfg.tagAlerta);
         mudancas.push('DOC sincronizado');
         this._logger.info('SyncOrchestrator._processarBiography',
-          `DOC normalizado: ${resourceName} → ${docFormatado}`);
+            `DOC normalizado: ${resourceName} → ${docFormatado}`);
       }
     }
   }

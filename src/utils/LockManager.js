@@ -13,8 +13,8 @@ class LockManager {
 
     if (!acquired) {
       this._logger.warn(
-        'LockManager',
-        `Lock não obtido após ${timeoutMs}ms${context ? ` | contexto: ${context}` : ''}`
+          'LockManager',
+          `Lock não obtido após ${timeoutMs}ms${context ? ` | contexto: ${context}` : ''}`,
       );
       if (typeof onLockFailed === 'function') onLockFailed();
       return undefined;

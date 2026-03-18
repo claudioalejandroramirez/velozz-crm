@@ -16,12 +16,12 @@ function _getContainer() {
   const contactService = new ContactService(logger);
   const tagService = new TagService(appConfig, logger, contactService);
   const orchestrator = new SyncOrchestrator(
-    appConfig, logger, sheetService, formService,
-    contactService, tagService, validator, formatter
+      appConfig, logger, sheetService, formService,
+      contactService, tagService, validator, formatter,
   );
 
   return {
-    appConfig, logger, lockManager, sheetService, orchestrator, tagService
+    appConfig, logger, lockManager, sheetService, orchestrator, tagService,
   };
 }
 
@@ -29,17 +29,17 @@ function _getContainer() {
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('⚙️ Flex Velozz')
-    .addItem('Executar Setup Inicial', 'setupInicial')
-    .addSeparator()
-    .addItem('Forçar Sync (Contacts → Planilha)', 'syncContatosParaPlanilha')
-    .addSeparator()
-    .addItem('Limpar Tags Expiradas', 'limparTagsExpiradas')
-    .addItem('Ver LOG', 'verLog')
-    .addToUi();
+      .addItem('Executar Setup Inicial', 'setupInicial')
+      .addSeparator()
+      .addItem('Forçar Sync (Contacts → Planilha)', 'syncContatosParaPlanilha')
+      .addSeparator()
+      .addItem('Limpar Tags Expiradas', 'limparTagsExpiradas')
+      .addItem('Ver LOG', 'verLog')
+      .addToUi();
 }
 
 function verLog() {
-  const { appConfig, sheetService } = _getContainer();
+  const {appConfig, sheetService} = _getContainer();
   const logSheet = sheetService.getSheetLOG();
   if (!logSheet) {
     SpreadsheetApp.getUi().alert('Aba LOG não encontrada. Execute o Setup Inicial primeiro.');
@@ -51,7 +51,7 @@ function verLog() {
 
 // --- MÓDULO 3: Setup Inicial ---
 function setupInicial() {
-  const { appConfig, sheetService, logger, tagService } = _getContainer();
+  const {appConfig, sheetService, logger, tagService} = _getContainer();
 
   // 1. Configura as abas PF e PJ
   sheetService.setupInicial();
@@ -62,7 +62,7 @@ function setupInicial() {
 
   // 3. Cria trigger diário para limparTagsExpiradas (3h da manhã) se não existir
   const triggers = ScriptApp.getProjectTriggers();
-  const jaTemTrigger = triggers.some(t => t.getHandlerFunction() === 'limparTagsExpiradas');
+  const jaTemTrigger = triggers.some((t) => t.getHandlerFunction() === 'limparTagsExpiradas');
   if (!jaTemTrigger) {
     ScriptApp.newTrigger('limparTagsExpiradas').timeBased().everyDays(1).atHour(3).create();
     logger.info('setupInicial', 'Trigger diário para limparTagsExpiradas criado (3h).');
@@ -70,8 +70,8 @@ function setupInicial() {
 
   logger.info('setupInicial', 'Setup executado com sucesso.');
   SpreadsheetApp.getUi().alert(
-    '✅ Setup Concluído!\n\nAbas PF, PJ e LOG preparadas.\n' +
-    'Trigger diário de limpeza de tags configurado para às 3h.'
+      '✅ Setup Concluído!\n\nAbas PF, PJ e LOG preparadas.\n' +
+    'Trigger diário de limpeza de tags configurado para às 3h.',
   );
 }
 
@@ -79,7 +79,7 @@ function setupInicial() {
 function processarFormulario(e) {
   if (!e || !e.values) return;
 
-  const { appConfig, lockManager, logger, orchestrator } = _getContainer();
+  const {appConfig, lockManager, logger, orchestrator} = _getContainer();
 
   const tipo = e.values[1];
   if (tipo !== 'Pessoa Física' && tipo !== 'Pessoa Jurídica') {
@@ -88,37 +88,37 @@ function processarFormulario(e) {
   }
 
   lockManager.withLock(
-    () => orchestrator.processarNovoContato(e, tipo),
-    () => logger.warn('processarFormulario', `Lock não obtido para processar formulário.`),
-    `processarFormulario:${tipo}`
+      () => orchestrator.processarNovoContato(e, tipo),
+      () => logger.warn('processarFormulario', `Lock não obtido para processar formulário.`),
+      `processarFormulario:${tipo}`,
   );
 }
 
 // --- MÓDULO 6: Sheets → Contacts (onEdit) ---
 function syncPlanilhaParaContatos(e) {
-  const { lockManager, logger, orchestrator } = _getContainer();
+  const {lockManager, logger, orchestrator} = _getContainer();
 
   lockManager.withLock(
-    () => orchestrator.syncPlanilhaParaContatos(e),
-    () => {
-      if (e && e.range) {
-        e.range.getSheet().getRange(e.range.getRow(), 10).setValue('Aguardando lock — tente novamente');
-      }
-      logger.warn('syncPlanilhaParaContatos', 'Lock não obtido para edição.');
-    },
-    'syncPlanilhaParaContatos'
+      () => orchestrator.syncPlanilhaParaContatos(e),
+      () => {
+        if (e && e.range) {
+          e.range.getSheet().getRange(e.range.getRow(), 10).setValue('Aguardando lock — tente novamente');
+        }
+        logger.warn('syncPlanilhaParaContatos', 'Lock não obtido para edição.');
+      },
+      'syncPlanilhaParaContatos',
   );
 }
 
 // --- MÓDULO 7: Contacts → Sheets (time-based) ---
 function syncContatosParaPlanilha() {
-  const { orchestrator } = _getContainer();
+  const {orchestrator} = _getContainer();
   orchestrator.syncContatosParaPlanilha();
 }
 
 // --- MÓDULO 8: Limpeza de Tags Expiradas ---
 function limparTagsExpiradas() {
-  const { tagService } = _getContainer();
+  const {tagService} = _getContainer();
   tagService.limparTagsExpiradas();
 }
 
@@ -131,6 +131,6 @@ if (typeof module !== 'undefined') {
     processarFormulario,
     syncPlanilhaParaContatos,
     syncContatosParaPlanilha,
-    limparTagsExpiradas
+    limparTagsExpiradas,
   };
 }

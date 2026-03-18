@@ -27,8 +27,8 @@ class Logger {
     if (!logSheet) {
       logSheet = ss.insertSheet(logName);
       logSheet.getRange(1, 1, 1, 4)
-        .setValues([['Timestamp', 'Nível', 'Função', 'Mensagem']])
-        .setFontWeight('bold');
+          .setValues([['Timestamp', 'Nível', 'Função', 'Mensagem']])
+          .setFontWeight('bold');
       logSheet.setFrozenRows(1);
       logSheet.hideSheet();
 

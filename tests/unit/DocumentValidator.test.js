@@ -6,12 +6,7 @@
 
 'use strict';
 
-// Carrega a classe real (sem mock — DocumentValidator não tem deps externas)
-const fs = require('fs');
-const path = require('path');
-eval(fs.readFileSync(
-    path.join(__dirname, '../../src/validators/DocumentValidator.js'), 'utf8'
-));
+const { DocumentValidator } = require('../../src/validators/DocumentValidator');
 
 describe('DocumentValidator', () => {
     let validator;
@@ -55,8 +50,6 @@ describe('DocumentValidator', () => {
         });
 
         test('CPF com zero à esquerda: não perde o zero na validação', () => {
-            // 01234567890 começa com 0 — se fosse tratado como número (1234567890)
-            // teria 10 dígitos e falharia. Deve ser tratado como string.
             expect(validator.validateCPF('01234567890')).toBe(true);
         });
     });
@@ -91,8 +84,6 @@ describe('DocumentValidator', () => {
         });
 
         test('CNPJ de empresa extinta: matematicamente válido mesmo assim', () => {
-            // CNPJs de empresas extintas continuam válidos matematicamente.
-            // O sistema não deve rejeitar com base no status da empresa.
             expect(validator.validateCNPJ('11222333000181')).toBe(true);
         });
     });
@@ -150,7 +141,6 @@ describe('DocumentValidator', () => {
         });
 
         test('extrai apenas dígitos antes de identificar', () => {
-            // Operador pode digitar com espaços ou traços acidentais
             const result = validator.identify('529 982 247-25');
             expect(result.digits).toBe('52998224725');
             expect(result.type).toBe('CPF');

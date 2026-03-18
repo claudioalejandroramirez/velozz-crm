@@ -1,31 +1,20 @@
 /**
  * @fileoverview Fábrica centralizada de objetos de teste.
- *
- * DECISÃO: centralizar criação de dados de teste evita duplicação e
- * garante que mudanças na estrutura de dados (ex: novo campo em FormData)
- * sejam refletidas em todos os testes automaticamente.
  */
 
 'use strict';
 
-class TestFactory {
-    // ─────────────────────────────────────────────────────────────────────
-    // FormData
-    // ─────────────────────────────────────────────────────────────────────
+const { AppConfig } = require('../../src/config/AppConfig');
 
-    /**
-     * Cria um FormData válido de Pessoa Física.
-     * @param {Object} [overrides] - Campos a sobrescrever
-     * @returns {Object}
-     */
+class TestFactory {
     static validPF(overrides = {}) {
         return {
-            tipo: 'PF',
+            tipo: 'Pessoa Física',
             isPF: true,
             nome: 'João',
             sobrenome: 'Silva',
             empresa: '',
-            documentoLimpo: '52998224725', // CPF matematicamente válido
+            documentoLimpo: '52998224725',
             docTipo: 'CPF',
             logradouro: 'Rua das Flores',
             numero: '123',
@@ -37,19 +26,14 @@ class TestFactory {
         };
     }
 
-    /**
-     * Cria um FormData válido de Pessoa Jurídica.
-     * @param {Object} [overrides]
-     * @returns {Object}
-     */
     static validPJ(overrides = {}) {
         return {
-            tipo: 'PJ',
+            tipo: 'Pessoa Jurídica',
             isPF: false,
             nome: 'Maria',
-            sobrenome: '',
+            sobrenome: 'Silva',
             empresa: 'Acme Ltda',
-            documentoLimpo: '11222333000181', // CNPJ matematicamente válido
+            documentoLimpo: '11222333000181',
             docTipo: 'CNPJ',
             logradouro: 'Av. Paulista',
             numero: '1000',
@@ -61,10 +45,6 @@ class TestFactory {
         };
     }
 
-    /**
-     * Cria um FormData de PF com DOC inválido.
-     * @returns {Object}
-     */
     static invalidDocPF() {
         return TestFactory.validPF({
             documentoLimpo: '12345678900',
@@ -72,15 +52,6 @@ class TestFactory {
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Eventos de formulário (onFormSubmit)
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Cria um evento onFormSubmit simulado para PF.
-     * @param {Object} [overrides] - Sobrescreve campos de namedValues
-     * @returns {Object}
-     */
     static formEventPF(overrides = {}) {
         return {
             namedValues: {
@@ -101,20 +72,20 @@ class TestFactory {
                 '529.982.247-25', 'Rua das Flores', '123', 'Apto 4',
                 '(11) 91234-5678', 'joao@teste.com',
             ],
+            range: {
+                getRow: () => 2,
+                getSheet: () => ({ getName: () => 'Respostas ao formulário 1' })
+            }
         };
     }
 
-    /**
-     * Cria um evento onFormSubmit simulado para PJ.
-     * @param {Object} [overrides]
-     * @returns {Object}
-     */
     static formEventPJ(overrides = {}) {
         return {
             namedValues: {
                 'Data': ['16/03/2026'],
                 'Tipo': ['Pessoa Jurídica'],
                 'Nome Responsável': ['Maria'],
+                'Sobrenome Responsável': ['Silva'],
                 'Empresa': ['Acme Ltda'],
                 'CNPJ': ['11.222.333/0001-81'],
                 'Endereço': ['Av. Paulista'],
@@ -124,34 +95,26 @@ class TestFactory {
                 'Email': ['contato@acme.com'],
                 ...overrides,
             },
-            values: [],
+            values: [
+                '16/03/2026', 'Pessoa Jurídica',
+                '', '', '', '', '', '', '', '',
+                'Maria', 'Silva', 'Acme Ltda',
+                '11.222.333/0001-81',
+                'Av. Paulista', '1000', 'Sala 5',
+                '(11) 3333-4444', 'contato@acme.com'
+            ],
+            range: {
+                getRow: () => 2,
+                getSheet: () => ({ getName: () => 'Respostas ao formulário 1' })
+            }
         };
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // AppConfig mock
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Cria uma instância de AppConfig com defaults puros (sem PropertiesService).
-     * @param {Object} [overrideProps]
-     * @returns {AppConfig}
-     */
     static appConfig(overrideProps = {}) {
-        // Requer que AppConfig esteja disponível no escopo (carregado pelo Jest)
         const props = { ...AppConfig.DEFAULTS, ...overrideProps };
-        return new AppConfig(props);
+        return new AppConfig(PropertiesService.getScriptProperties());
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Contato da People API
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Cria um objeto contato simulado da People API.
-     * @param {Object} [overrides]
-     * @returns {Object}
-     */
     static contact(overrides = {}) {
         return {
             resourceName: 'people/c123456789',

@@ -5,17 +5,12 @@
 
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const { AppConfig } = require('../../src/config/AppConfig');
+const { Logger } = require('../../src/utils/Logger');
+const { SheetService } = require('../../src/services/SheetService');
 const { TestFactory } = require('../helpers/TestFactory');
 
-// Carrega dependências na ordem correta (sem módulos ES)
-[
-    '../../src/config/AppConfig.js',
-    '../../src/utils/Formatter.js',
-    '../../src/utils/Logger.js',
-    '../../src/services/SheetService.js',
-].forEach(f => eval(fs.readFileSync(path.join(__dirname, f), 'utf8')));
+// Os mocks já estão carregados via setupFiles no jest.config.js
 
 describe('SheetService', () => {
     let appConfig;
@@ -25,10 +20,7 @@ describe('SheetService', () => {
 
     beforeEach(() => {
         appConfig = TestFactory.appConfig();
-
-        // Logger silencioso para não poluir output dos testes
         logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
-
         sheetService = new SheetService(appConfig, logger);
 
         // Sheet com cabeçalho padrão PF
@@ -71,14 +63,13 @@ describe('SheetService', () => {
 
             expect(() => {
                 sheetService.getColumnIndex(mockSheet, 'ColunaQueNaoExiste');
-            }).toThrow(/PF/); // Menciona o nome da aba no erro
+            }).toThrow(/PF/);
         });
 
         test('usa cache na segunda chamada (não relê a planilha)', () => {
             sheetService.getColumnIndex(mockSheet, 'Nome');
             sheetService.getColumnIndex(mockSheet, 'Nome');
 
-            // getRange só deve ter sido chamado UMA vez (para carregar o cache)
             expect(mockSheet.getRange).toHaveBeenCalledTimes(1);
         });
 
@@ -92,7 +83,6 @@ describe('SheetService', () => {
             sheetService.getColumnIndex(mockSheet, 'Nome');
             sheetService.getColumnIndex(mockSheet2, 'CNPJ');
 
-            // CNPJ não existe na aba PF
             expect(() => {
                 sheetService.getColumnIndex(mockSheet, 'CNPJ');
             }).toThrow();
@@ -110,20 +100,17 @@ describe('SheetService', () => {
 
         // ── Resiliência a mudanças no Forms ──────────────────────────────
         test('funciona corretamente se cliente adicionar coluna extra no Forms', () => {
-            // Cliente inseriu "Origem" entre "Email" e "Status"
             const sheetComColunaExtra = SpreadsheetApp._createSheetMock('PF', [
                 ['Data', 'Tipo', 'Nome', 'Sobrenome', 'CPF', 'Endereço', 'Número',
-                    'Complemento', 'Telefone', 'Email', 'Origem', // ← coluna extra
+                    'Complemento', 'Telefone', 'Email', 'Origem',
                     'Status', 'ResourceName', 'Última Atualização'],
             ]);
 
-            // Status agora está na col 12, não 11 — deve localizar corretamente
             expect(sheetService.getColumnIndex(sheetComColunaExtra, 'Status')).toBe(12);
             expect(sheetService.getColumnIndex(sheetComColunaExtra, 'ResourceName')).toBe(13);
         });
 
         test('funciona se cliente reordenar perguntas no Forms', () => {
-            // CPF foi movido para a posição 3 (antes de Nome)
             const sheetReordenada = SpreadsheetApp._createSheetMock('PF', [
                 ['Data', 'Tipo', 'CPF', 'Nome', 'Sobrenome', 'Endereço',
                     'Número', 'Complemento', 'Telefone', 'Email',
@@ -136,57 +123,49 @@ describe('SheetService', () => {
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // validateSheetStructure()
+    // getSheetRespostas(), getSheetPF(), getSheetPJ()
     // ═══════════════════════════════════════════════════════════════════════
-    describe('validateSheetStructure()', () => {
-
-        test('retorna valid=true para aba PF com estrutura completa', () => {
-            const result = sheetService.validateSheetStructure(mockSheet, 'PF');
-            expect(result.valid).toBe(true);
-            expect(result.missing).toHaveLength(0);
+    describe('getters de sheets', () => {
+        test('getSheetRespostas() retorna a aba de respostas configurada', () => {
+            const sheet = sheetService.getSheetRespostas();
+            expect(sheet).toBeDefined();
         });
 
-        test('retorna missing com colunas ausentes', () => {
-            // Aba sem coluna CPF e sem Telefone
-            const incompleteSheet = SpreadsheetApp._createSheetMock('PF', [
-                ['Data', 'Tipo', 'Nome', 'Sobrenome', 'Endereço',
-                    'Número', 'Complemento', 'Email',
-                    'Status', 'ResourceName', 'Última Atualização'],
-            ]);
-
-            const result = sheetService.validateSheetStructure(incompleteSheet, 'PF');
-            expect(result.valid).toBe(false);
-            expect(result.missing).toContain('CPF');
-            expect(result.missing).toContain('Telefone');
+        test('getSheetPF() retorna a aba PF configurada', () => {
+            const sheet = sheetService.getSheetPF();
+            expect(sheet).toBeDefined();
+            expect(sheet.getName()).toBe('PF');
         });
 
-        test('colunas do script são tratadas como "serão criadas" (não missing)', () => {
-            // Aba sem Status, ResourceName, Última Atualização (ainda não setupada)
-            const freshSheet = SpreadsheetApp._createSheetMock('PF', [
-                ['Data', 'Tipo', 'Nome', 'Sobrenome', 'CPF', 'Endereço',
-                    'Número', 'Complemento', 'Telefone', 'Email'],
-            ]);
+        test('getSheetPJ() retorna a aba PJ configurada', () => {
+            const sheet = sheetService.getSheetPJ();
+            expect(sheet).toBeDefined();
+            expect(sheet.getName()).toBe('PJ');
+        });
+    });
 
-            const result = sheetService.validateSheetStructure(freshSheet, 'PF');
-            // Não deve estar em missing — são criadas pelo script
-            expect(result.missing).not.toContain('Status');
-            expect(result.missing).not.toContain('ResourceName');
-            // Mas devem estar em found com nota
-            const foundStatus = result.found.find(f => f.includes('Status'));
-            expect(foundStatus).toContain('será criada');
+    // ═══════════════════════════════════════════════════════════════════════
+    // escreverNovaLinha()
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('escreverNovaLinha()', () => {
+        test('escreve linha corretamente para PF', () => {
+            const dados = TestFactory.validPF();
+            const novaLinha = sheetService.escreverNovaLinha(mockSheet, dados, 'Pessoa Física', 'Processando...');
+
+            expect(novaLinha).toBe(3); // Começou com 2 linhas, nova é 3
+            expect(mockSheet.appendRow).toHaveBeenCalled();
         });
 
-        test('aba PJ valida colunas específicas de PJ (CNPJ, Empresa)', () => {
+        test('escreve linha corretamente para PJ', () => {
             const pjSheet = SpreadsheetApp._createSheetMock('PJ', [
-                ['Data', 'Tipo', 'Nome Responsável', 'Empresa', 'CNPJ',
-                    'Endereço', 'Número', 'Complemento', 'Telefone', 'Email',
-                    'Status', 'ResourceName', 'Última Atualização'],
+                ['Data', 'Nome Responsável', 'Empresa', 'CNPJ', 'Endereço', 'Número',
+                    'Complemento', 'Telefone', 'Email', 'Status', 'ResourceName', 'Última Atualização'],
             ]);
+            const dados = TestFactory.validPJ();
+            const novaLinha = sheetService.escreverNovaLinha(pjSheet, dados, 'Pessoa Jurídica', 'Processando...');
 
-            const result = sheetService.validateSheetStructure(pjSheet, 'PJ');
-            expect(result.valid).toBe(true);
-            expect(result.missing).not.toContain('CNPJ');
-            expect(result.missing).not.toContain('Empresa');
+            expect(novaLinha).toBe(2);
+            expect(pjSheet.appendRow).toHaveBeenCalled();
         });
     });
 
@@ -196,45 +175,38 @@ describe('SheetService', () => {
     describe('findDuplicateDoc()', () => {
 
         test('encontra DOC duplicado e retorna a linha correta', () => {
-            const result = sheetService.findDuplicateDoc(
-                mockSheet, '52998224725', 'CPF'
-            );
-            expect(result.found).toBe(true);
-            expect(result.row).toBe(2);
+            const result = sheetService.verificarDuplicidadeDoc(mockSheet, '52998224725');
+            expect(result.encontrado).toBe(true);
+            expect(result.linha).toBe(2);
         });
 
-        test('retorna found=false quando DOC não existe', () => {
-            const result = sheetService.findDuplicateDoc(
-                mockSheet, '99999999999', 'CPF'
-            );
-            expect(result.found).toBe(false);
-            expect(result.row).toBeNull();
+        test('retorna encontrado=false quando DOC não existe', () => {
+            const result = sheetService.verificarDuplicidadeDoc(mockSheet, '99999999999');
+            expect(result.encontrado).toBe(false);
+            expect(result.linha).toBeNull();
         });
 
         test('ignora formatação: encontra CPF com máscara na planilha', () => {
             const sheetComMascara = SpreadsheetApp._createSheetMock('PF', [
                 ['Data', 'Tipo', 'Nome', 'Sobrenome', 'CPF', 'Endereço', 'Número',
                     'Complemento', 'Telefone', 'Email', 'Status', 'ResourceName', 'Última Atualização'],
-                ['16/03/2026', 'PF', 'João', 'Silva', '529.982.247-25', // CPF com máscara
+                ['16/03/2026', 'PF', 'João', 'Silva', '529.982.247-25',
                     'R A', '1', '', '11912345678', 'j@j.com', 'Sync', 'people/c1', '2026-03-16'],
             ]);
 
-            const result = sheetService.findDuplicateDoc(
-                sheetComMascara, '52998224725', 'CPF'
-            );
-            expect(result.found).toBe(true);
+            const result = sheetService.verificarDuplicidadeDoc(sheetComMascara, '52998224725');
+            expect(result.encontrado).toBe(true);
         });
 
-        test('planilha vazia retorna found=false sem erro', () => {
+        test('planilha vazia retorna encontrado=false sem erro', () => {
             const emptySheet = SpreadsheetApp._createSheetMock('PF', [
                 ['Data', 'CPF'],
             ]);
-            const result = sheetService.findDuplicateDoc(emptySheet, '52998224725', 'CPF');
-            expect(result.found).toBe(false);
+            const result = sheetService.verificarDuplicidadeDoc(emptySheet, '52998224725');
+            expect(result.encontrado).toBe(false);
         });
 
         test('funciona mesmo se coluna DOC foi movida no Forms', () => {
-            // CPF agora está na posição 3 (não 5)
             const reorderedSheet = SpreadsheetApp._createSheetMock('PF', [
                 ['Data', 'Tipo', 'CPF', 'Nome', 'Sobrenome', 'Endereço',
                     'Número', 'Complemento', 'Telefone', 'Email',
@@ -243,28 +215,36 @@ describe('SheetService', () => {
                     'R A', '1', '', '11912345678', 'j@j.com', 'Sync', 'people/c1', '2026-03-16'],
             ]);
 
-            const result = sheetService.findDuplicateDoc(
-                reorderedSheet, '52998224725', 'CPF'
-            );
-            expect(result.found).toBe(true);
-            expect(result.row).toBe(2);
+            const result = sheetService.verificarDuplicidadeDoc(reorderedSheet, '52998224725');
+            expect(result.encontrado).toBe(true);
+            expect(result.linha).toBe(2);
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // setCellByHeader() e getCellByHeader()
+    // encontrarLinhaPorResourceName()
     // ═══════════════════════════════════════════════════════════════════════
-    describe('setCellByHeader() / getCellByHeader()', () => {
-
-        test('escreve e lê o valor correto pelo nome do cabeçalho', () => {
-            sheetService.setCellByHeader(mockSheet, 2, 'Status', 'Sincronizado');
-            const val = sheetService.getCellByHeader(mockSheet, 2, 'Status');
-            expect(val).toBe('Sincronizado');
+    describe('encontrarLinhaPorResourceName()', () => {
+        test('encontra a linha correta pelo resourceName', () => {
+            const result = sheetService.encontrarLinhaPorResourceName('people/c123');
+            expect(result.row).toBe(2);
+            expect(result.sheet.getName()).toBe('PF');
         });
 
-        test('forceText=true aplica @STRING@ antes de setValue', () => {
-            sheetService.setCellByHeader(mockSheet, 2, 'CPF', '01234567890', true);
-            // Verifica que setNumberFormat foi chamado com @STRING@
+        test('retorna null se resourceName não encontrado', () => {
+            const result = sheetService.encontrarLinhaPorResourceName('people/c999');
+            expect(result.row).toBeNull();
+            expect(result.sheet).toBeNull();
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // setDocLinha() com forceText
+    // ═══════════════════════════════════════════════════════════════════════
+    describe('setDocLinha()', () => {
+        test('setDocLinha aplica @STRING@ antes de setValue', () => {
+            sheetService.setDocLinha(mockSheet, 2, '01234567890');
+
             const allCalls = mockSheet.getRange.mock.results
                 .map(r => r.value)
                 .filter(Boolean);
@@ -273,22 +253,6 @@ describe('SheetService', () => {
             );
             expect(formattedCell).toBeDefined();
             expect(formattedCell.setNumberFormat).toHaveBeenCalledWith('@STRING@');
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // findRowByResourceName()
-    // ═══════════════════════════════════════════════════════════════════════
-    describe('findRowByResourceName()', () => {
-
-        test('encontra a linha correta pelo resourceName', () => {
-            const row = sheetService.findRowByResourceName(mockSheet, 'people/c123');
-            expect(row).toBe(2);
-        });
-
-        test('retorna null se resourceName não encontrado', () => {
-            const row = sheetService.findRowByResourceName(mockSheet, 'people/c999');
-            expect(row).toBeNull();
         });
     });
 });

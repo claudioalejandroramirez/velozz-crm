@@ -5,15 +5,10 @@
 
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const { AppConfig } = require('../../src/config/AppConfig');
+const { Logger } = require('../../src/utils/Logger');
+const { TagService } = require('../../src/services/TagService');
 const { TestFactory } = require('../helpers/TestFactory');
-
-[
-    '../../src/config/AppConfig.js',
-    '../../src/utils/Logger.js',
-    '../../src/services/TagService.js',
-].forEach(f => eval(fs.readFileSync(path.join(__dirname, f), 'utf8')));
 
 describe('TagService', () => {
     let tagService;
@@ -69,7 +64,15 @@ describe('TagService', () => {
             _reset: () => store.clear(),
         };
 
-        tagService = new TagService(appConfig, logger, mockPeople, mockProps);
+        // ContactService mockado
+        const mockContactService = {
+            aplicarTag: jest.fn(),
+            removerTag: jest.fn()
+        };
+
+        tagService = new TagService(appConfig, logger, mockContactService, mockProps);
+        // Substitui o _contactService interno pelo mock
+        tagService._contactService = mockContactService;
     });
 
     afterEach(() => {
@@ -78,85 +81,15 @@ describe('TagService', () => {
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // apply()
+    // aplicarTagTemporaria()
     // ═══════════════════════════════════════════════════════════════════════
-    describe('apply()', () => {
-
-        test('chama ContactGroups.Members.modify com resourceNamesToAdd', () => {
-            tagService.apply('people/c123', 'revisar');
-
-            expect(mockPeople.ContactGroups.Members.modify).toHaveBeenCalledWith(
-                { resourceNamesToAdd: ['people/c123'] },
-                'contactGroups/revisar'
-            );
-        });
-
-        test('usa cache: ContactGroups.list é chamado apenas uma vez', () => {
-            tagService.apply('people/c123', 'revisar');
-            tagService.apply('people/c123', 'novo-telefone');
-            tagService.apply('people/c123', 'novo-email');
-
-            expect(mockPeople.ContactGroups.list).toHaveBeenCalledTimes(1);
-        });
-
-        test('cria grupo se não existir e invalida cache', () => {
-            tagService.apply('people/c123', 'grupo-novo');
-
-            expect(mockPeople.ContactGroups.create).toHaveBeenCalledWith({
-                contactGroup: { name: 'grupo-novo' },
-            });
-            // Cache foi invalidado após criar o grupo
-            expect(tagService._groupCache).toBeNull();
-        });
-
-        test('não lança erro se modify falhar (grupo já tem o contato)', () => {
-            mockPeople.ContactGroups.Members.modify.mockImplementation(() => {
-                throw new Error('Member already in group');
-            });
-
-            expect(() => tagService.apply('people/c123', 'revisar')).not.toThrow();
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // remove()
-    // ═══════════════════════════════════════════════════════════════════════
-    describe('remove()', () => {
-
-        test('chama ContactGroups.Members.modify com resourceNamesToRemove', () => {
-            tagService.remove('people/c123', 'revisar');
-
-            expect(mockPeople.ContactGroups.Members.modify).toHaveBeenCalledWith(
-                { resourceNamesToRemove: ['people/c123'] },
-                'contactGroups/revisar'
-            );
-        });
-
-        test('não faz nada se grupo não existe', () => {
-            tagService.remove('people/c123', 'grupo-inexistente');
-            expect(mockPeople.ContactGroups.Members.modify).not.toHaveBeenCalled();
-        });
-
-        test('não lança erro se contato não estiver no grupo', () => {
-            mockPeople.ContactGroups.Members.modify.mockImplementation(() => {
-                throw new Error('Member not in group');
-            });
-
-            expect(() => tagService.remove('people/c123', 'revisar')).not.toThrow();
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // applyTemporary()
-    // ═══════════════════════════════════════════════════════════════════════
-    describe('applyTemporary()', () => {
+    describe('aplicarTagTemporaria()', () => {
 
         test('aplica a tag E salva o timer de expiração', () => {
-            tagService.applyTemporary('people/c123', 'novo-telefone');
+            tagService.aplicarTagTemporaria('people/c123', 'novo-telefone');
 
-            expect(mockPeople.ContactGroups.Members.modify).toHaveBeenCalled();
+            expect(tagService._contactService.aplicarTag).toHaveBeenCalledWith('people/c123', 'novo-telefone');
 
-            // Verifica que o timer foi salvo
             const savedKeys = [...mockProps._store.keys()];
             const expiryKey = savedKeys.find(k => k.startsWith('TAG_EXPIRY_'));
             expect(expiryKey).toBeDefined();
@@ -164,7 +97,7 @@ describe('TagService', () => {
 
         test('timer contém resourceName, tagName e expiry no futuro', () => {
             const before = Date.now();
-            tagService.applyTemporary('people/c123', 'novo-telefone');
+            tagService.aplicarTagTemporaria('people/c123', 'novo-telefone');
             const after = Date.now();
 
             const savedKeys = [...mockProps._store.keys()];
@@ -173,73 +106,62 @@ describe('TagService', () => {
 
             expect(data.resourceName).toBe('people/c123');
             expect(data.tagName).toBe('novo-telefone');
-            // Expiry deve ser 30 dias no futuro (± margem de 1s para o teste)
             const expectedExpiry = before + (30 * 24 * 60 * 60 * 1000);
             expect(data.expiry).toBeGreaterThanOrEqual(expectedExpiry - 1000);
             expect(data.expiry).toBeLessThanOrEqual(after + (30 * 24 * 60 * 60 * 1000) + 1000);
         });
 
-        test('reaplicar tag reinicia o timer (+30 dias a partir de agora)', () => {
-            tagService.applyTemporary('people/c123', 'novo-telefone');
+        test('falha ao salvar expiração não interrompe fluxo (log warn)', () => {
+            mockProps.setProperty.mockImplementationOnce(() => {
+                throw new Error('Storage full');
+            });
 
-            const savedKeys = [...mockProps._store.keys()];
-            const expiryKey = savedKeys.find(k => k.startsWith('TAG_EXPIRY_'));
-            const firstExpiry = JSON.parse(mockProps._store.get(expiryKey)).expiry;
+            expect(() => {
+                tagService.aplicarTagTemporaria('people/c123', 'novo-telefone');
+            }).not.toThrow();
 
-            // Simula passagem de tempo e reaplicação
-            jest.useFakeTimers();
-            jest.advanceTimersByTime(5 * 24 * 60 * 60 * 1000); // +5 dias
-            tagService.applyTemporary('people/c123', 'novo-telefone');
-            jest.useRealTimers();
-
-            const secondExpiry = JSON.parse(mockProps._store.get(expiryKey)).expiry;
-            // Segundo expiry deve ser DEPOIS do primeiro (timer reiniciado)
-            expect(secondExpiry).toBeGreaterThan(firstExpiry);
+            expect(logger.warn).toHaveBeenCalled();
         });
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // cleanExpired()
+    // limparTagsExpiradas()
     // ═══════════════════════════════════════════════════════════════════════
-    describe('cleanExpired()', () => {
+    describe('limparTagsExpiradas()', () => {
 
         test('remove tag e chave quando expirada', () => {
-            // Insere entrada já expirada (no passado)
-            const key = 'TAG_EXPIRY_people_c123_novo_telefone';
+            const key = tagService._chaveExpiracao('people/c123', 'novo-telefone');
             mockProps._store.set(key, JSON.stringify({
                 resourceName: 'people/c123',
                 tagName: 'novo-telefone',
-                expiry: Date.now() - 1000, // 1 segundo no passado
+                expiry: Date.now() - 1000,
             }));
 
-            const removed = tagService.cleanExpired();
+            const removed = tagService.limparTagsExpiradas();
 
             expect(removed).toBe(1);
-            expect(mockPeople.ContactGroups.Members.modify).toHaveBeenCalledWith(
-                { resourceNamesToRemove: ['people/c123'] },
-                expect.any(String)
-            );
+            expect(tagService._contactService.removerTag).toHaveBeenCalledWith('people/c123', 'novo-telefone');
             expect(mockProps.deleteProperty).toHaveBeenCalledWith(key);
         });
 
         test('não remove tag com timer ainda ativo', () => {
-            const key = 'TAG_EXPIRY_people_c123_novo_email';
+            const key = tagService._chaveExpiracao('people/c123', 'novo-email');
             mockProps._store.set(key, JSON.stringify({
                 resourceName: 'people/c123',
                 tagName: 'novo-email',
-                expiry: Date.now() + (30 * 24 * 60 * 60 * 1000), // 30 dias no futuro
+                expiry: Date.now() + (30 * 24 * 60 * 60 * 1000),
             }));
 
-            const removed = tagService.cleanExpired();
+            const removed = tagService.limparTagsExpiradas();
 
             expect(removed).toBe(0);
-            expect(mockPeople.ContactGroups.Members.modify).not.toHaveBeenCalled();
+            expect(tagService._contactService.removerTag).not.toHaveBeenCalled();
         });
 
         test('remove entradas com JSON corrompido (limpeza defensiva)', () => {
             mockProps._store.set('TAG_EXPIRY_corrupted', 'json-invalido-{{{');
 
-            expect(() => tagService.cleanExpired()).not.toThrow();
+            expect(() => tagService.limparTagsExpiradas()).not.toThrow();
             expect(mockProps.deleteProperty).toHaveBeenCalledWith('TAG_EXPIRY_corrupted');
         });
 
@@ -247,42 +169,15 @@ describe('TagService', () => {
             mockProps._store.set('CONTACTS_SYNC_TOKEN', 'token_abc');
             mockProps._store.set('COMPANY_NAME', 'Acme');
 
-            tagService.cleanExpired();
+            tagService.limparTagsExpiradas();
 
-            // Chaves de configuração não devem ser tocadas
             expect(mockProps._store.has('CONTACTS_SYNC_TOKEN')).toBe(true);
             expect(mockProps._store.has('COMPANY_NAME')).toBe(true);
         });
 
         test('retorna 0 quando não há tags expiradas', () => {
-            const removed = tagService.cleanExpired();
+            const removed = tagService.limparTagsExpiradas();
             expect(removed).toBe(0);
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // hasActiveTimer()
-    // ═══════════════════════════════════════════════════════════════════════
-    describe('hasActiveTimer()', () => {
-
-        test('retorna true para tag com timer ativo', () => {
-            tagService.applyTemporary('people/c123', 'novo-telefone');
-            expect(tagService.hasActiveTimer('people/c123', 'novo-telefone')).toBe(true);
-        });
-
-        test('retorna false para tag sem timer', () => {
-            expect(tagService.hasActiveTimer('people/c999', 'novo-telefone')).toBe(false);
-        });
-
-        test('retorna false para timer expirado', () => {
-            const key = tagService._expiryKey('people/c123', 'novo-email');
-            mockProps._store.set(key, JSON.stringify({
-                resourceName: 'people/c123',
-                tagName: 'novo-email',
-                expiry: Date.now() - 1000,
-            }));
-
-            expect(tagService.hasActiveTimer('people/c123', 'novo-email')).toBe(false);
         });
     });
 

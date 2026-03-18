@@ -1,7 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Velozz CRM — Deploy para Produção
-# v1.1 — Fixes: skip_tests expression, smoke-test non-blocking,
-#               notify-success needs+body, readGitVersion stdio
+# v2.0 — Adaptado para estrutura modularizada
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: Deploy
@@ -15,6 +14,7 @@ on:
       - "scripts/**"
       - "appsscript.json"
       - "package.json"
+      - ".clasp.json"
 
   workflow_dispatch:
     inputs:
@@ -41,14 +41,10 @@ jobs:
   # JOB 1: Qualidade — Lint + Testes
   # ────────────────────────────────────────────────────────────────────────────
   quality:
-    name: 🔍 Qualidade (Lint + Testes)
+    name: "🔍 Qualidade (Lint + Testes)"
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # FIX 1: usar `inputs.skip_tests` em vez de `github.event.inputs.skip_tests`
-    # Em pushes normais, `inputs` é um objeto vazio — `inputs.skip_tests` avalia
-    # para '' (falsy). Em workflow_dispatch com skip_tests='true', pula o job.
-    # A forma `github.event.inputs.*` pode lançar erro de null pointer em pushes.
     if: ${{ inputs.skip_tests != 'true' }}
 
     steps:
@@ -96,7 +92,7 @@ jobs:
   # JOB 2: Bundle
   # ────────────────────────────────────────────────────────────────────────────
   bundle:
-    name: 📦 Bundle
+    name: "📦 Bundle"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: quality
@@ -162,13 +158,13 @@ jobs:
   # JOB 3: Deploy
   # ────────────────────────────────────────────────────────────────────────────
   deploy:
-    name: 🚀 Deploy → Google Apps Script
+    name: "🚀 Deploy → Google Apps Script"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: bundle
     environment:
       name: production
-      url: https://script.google.com/d/${{ secrets.SCRIPT_ID }}/edit
+      url: "https://script.google.com/d/${{ secrets.SCRIPT_ID }}/edit"
 
     steps:
       - name: Checkout
@@ -224,32 +220,12 @@ jobs:
           npx clasp push --force
           echo "✅ clasp push concluído com sucesso"
 
-      # FIX 2: Smoke test completamente não-bloqueante.
-      # Access tokens OAuth expiram em ~1h — o token no CLASP_TOKEN secret
-      # quase sempre está expirado no momento do CI. O clasp lida com refresh
-      # internamente, mas extrair o raw token para curl não funciona.
-      # Solução: smoke test via clasp run (usa refresh_token automaticamente)
-      # com || true explícito para nunca bloquear o pipeline.
-      - name: Smoke Test — Verificar deploy via clasp
+      - name: Smoke Test — Verificar deploy via clasp (não bloqueante)
         id: smoke-test
         run: |
-          echo "🔬 Executando smoke test..."
-
-          # clasp run usa o refresh_token automaticamente (sem expiração)
-          # Tenta executar uma função utilitária leve
-          SMOKE_RESULT=$(npx clasp run 'onOpen' 2>&1) || SMOKE_RESULT="SKIPPED"
-
+          echo "🔬 Executando smoke test (informativo, não bloqueante)..."
+          SMOKE_RESULT=$(npx clasp run 'onOpen' 2>&1 || echo "SKIPPED - função onOpen pode não ser executável via API")
           echo "Resultado: $SMOKE_RESULT"
-
-          if echo "$SMOKE_RESULT" | grep -qi "error\|failed\|exception"; then
-            echo "⚠️  Smoke test retornou aviso — verificar manualmente."
-            echo "💡 Isso pode indicar que o script não está configurado como"
-            echo "   'API executable' ou que o onOpen requer contexto de planilha."
-            echo "   O deploy prossegue normalmente."
-          else
-            echo "✅ Smoke test concluído sem erros críticos."
-          fi
-          # Sempre exit 0 — smoke test é informativo, não bloqueante
           exit 0
 
       - name: Versionar deployment no GAS
@@ -273,7 +249,7 @@ jobs:
   # JOB 4: Rollback automático
   # ────────────────────────────────────────────────────────────────────────────
   rollback:
-    name: ⏪ Rollback Automático
+    name: "⏪ Rollback Automático"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: deploy
@@ -356,11 +332,9 @@ jobs:
 
   # ────────────────────────────────────────────────────────────────────────────
   # JOB 5: Notificação de sucesso
-  # FIX 3: `bundle` adicionado em `needs` para acessar `needs.bundle.outputs.version`
-  # FIX 4: body do e-mail completado com linha de fechamento
   # ────────────────────────────────────────────────────────────────────────────
   notify-success:
-    name: 📬 Notificar Sucesso
+    name: "📬 Notificar Sucesso"
     runs-on: ubuntu-latest
     needs: [deploy, bundle]
     if: success()

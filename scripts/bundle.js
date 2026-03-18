@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * @fileoverview Pipeline de bundle para o Velozz CRM.
- * v1.1 — Fix: readGitVersion stdio array não suportado por execSync em
- *         todas as versões do Node; simplificado para encoding+try/catch.
+ * v2.0 — Adaptado para arquivos sem prefixo numérico em src/
  */
 
 'use strict';
@@ -14,18 +13,19 @@ const ROOT = path.resolve(__dirname, '..');
 const SRC_DIR = path.join(ROOT, 'src');
 const DIST_DIR = path.join(ROOT, 'dist');
 
+// ORDEM DE BUNDLE - ARQUIVOS FONTE SEM PREFIXO, DESTINO COM PREFIXO
 const BUNDLE_ORDER = [
-  ['00', 'config/AppConfig.js', '00_AppConfig.gs'],
-  ['01', 'utils/Logger.js', '01_Logger.gs'],
-  ['02', 'utils/LockManager.js', '02_LockManager.gs'],
-  ['03', 'utils/Formatter.js', '03_Formatter.gs'],
-  ['04', 'validators/DocumentValidator.js', '04_DocumentValidator.gs'],
-  ['05', 'services/SheetService.js', '05_SheetService.gs'],
-  ['06', 'services/FormService.js', '06_FormService.gs'],
-  ['07', 'services/TagService.js', '07_TagService.gs'],
-  ['08', 'services/ContactService.js', '08_ContactService.gs'],
-  ['09', 'services/SyncOrchestrator.js', '09_SyncOrchestrator.gs'],
-  ['10', 'triggers/TriggerHandlers.js', '10_TriggerHandlers.gs'],
+  ['config/AppConfig.js', '00_AppConfig.gs'],
+  ['utils/Logger.js', '01_Logger.gs'],
+  ['utils/LockManager.js', '02_LockManager.gs'],
+  ['utils/Formatter.js', '03_Formatter.gs'],
+  ['validators/DocumentValidator.js', '04_DocumentValidator.gs'],
+  ['services/SheetService.js', '05_SheetService.gs'],
+  ['services/FormService.js', '06_FormService.gs'],
+  ['services/TagService.js', '07_TagService.gs'],
+  ['services/ContactService.js', '08_ContactService.gs'],
+  ['services/SyncOrchestrator.js', '09_SyncOrchestrator.gs'],
+  ['triggers/TriggerHandlers.js', '10_TriggerHandlers.gs'],
 ];
 
 const HTML_FILES = [
@@ -44,62 +44,59 @@ const CONFIG_FILES = ['appsscript.json'];
  */
 function readVersion() {
   const pkg = JSON.parse(
-      fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
+    fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
   );
   return pkg.version || '0.0.0';
 }
 
 /**
- * FIX 5: readGitVersion simplificado.
- *
- * PROBLEMA ORIGINAL:
- * `execSync` com `stdio: ['pipe', 'pipe', 'ignore']` (array) não é suportado
- * de forma confiável em todas as versões do Node.js para execSync — esse
- * formato é próprio de `spawn`. Em alguns ambientes, o retorno era undefined
- * em vez do stdout, causando `.toString()` em undefined → TypeError.
- *
- * SOLUÇÃO:
- * Usar `{ encoding: 'utf8' }` — execSync retorna string diretamente.
- * Stderr vai para o terminal (aceitável em CI — vira log da action).
- * Se o comando falhar (repo sem tags), o catch retorna readVersion().
- *
+ * Obtém a versão do git tag mais recente.
  * @return {string}
  */
 function readGitVersion() {
   try {
-    const {execSync} = require('child_process');
+    const { execSync } = require('child_process');
     const tag = execSync('git describe --tags --abbrev=0', {
       cwd: ROOT,
       encoding: 'utf8',
-      // 'pipe' captura stderr em vez de imprimir — evita ruído no CI
-      // mas não quebra se o comando falhar (catch cuida disso)
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     return tag || readVersion();
   } catch (_) {
-    // Repo sem tags ainda (primeira execução, por exemplo)
     return readVersion();
   }
 }
 
 /**
  * Garante que dist/ existe e limpa artefatos de builds anteriores.
- * Remove .gs, .html e bundle-manifest.json (mas preserva .clasp.json se houver).
  */
 function prepareDist() {
   if (fs.existsSync(DIST_DIR)) {
     fs.readdirSync(DIST_DIR).forEach((file) => {
       if (
         file.endsWith('.gs') ||
-                file.endsWith('.html') ||
-                file === 'bundle-manifest.json'
+        file.endsWith('.html') ||
+        file === 'bundle-manifest.json'
       ) {
         fs.unlinkSync(path.join(DIST_DIR, file));
       }
     });
   } else {
-    fs.mkdirSync(DIST_DIR, {recursive: true});
+    fs.mkdirSync(DIST_DIR, { recursive: true });
   }
+}
+
+/**
+ * Remove declarações module.exports para o ambiente GAS.
+ * @param {string} content
+ * @return {string}
+ */
+function removeModuleExports(content) {
+  // Remove blocos if (typeof module !== 'undefined') { ... }
+  return content.replace(
+    /if\s*\(\s*typeof\s+module\s*!==\s*['"]undefined['"]\s*\)\s*\{\s*module\.exports\s*=\s*[^;]+\s*;?\s*\}/g,
+    ''
+  );
 }
 
 /**
@@ -125,13 +122,14 @@ function transform(content, fileName, version) {
   result = result.replace(/^export\s+(default\s+)?/gm, '');
   result = result.replace(/^import\s+.*?from\s+['"].*?['"]\s*;?\s*$/gm, '');
 
+  // Remove module.exports para ambiente GAS
+  result = removeModuleExports(result);
+
   return banner + result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VALIDAÇÃO PRÉ-BUNDLE
-// Verifica que todos os arquivos fonte existem ANTES de começar,
-// evitando bundle parcialmente gerado em caso de arquivo faltando.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -141,7 +139,7 @@ function transform(content, fileName, version) {
 function validateSources() {
   const missing = [];
 
-  BUNDLE_ORDER.forEach(([, srcRelative]) => {
+  BUNDLE_ORDER.forEach(([srcRelative]) => {
     const srcPath = path.join(SRC_DIR, srcRelative);
     if (!fs.existsSync(srcPath)) missing.push(`src/${srcRelative}`);
   });
@@ -156,7 +154,7 @@ function validateSources() {
     if (!fs.existsSync(srcPath)) missing.push(fileName);
   });
 
-  return {valid: missing.length === 0, missing};
+  return { valid: missing.length === 0, missing };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,12 +167,11 @@ function bundle() {
   const version = readGitVersion();
   console.log(`📦 Versão: ${version}`);
 
-  // Valida fontes antes de qualquer escrita em disco
-  const {valid, missing} = validateSources();
+  const { valid, missing } = validateSources();
   if (!valid) {
     console.error('\n❌ Arquivos fonte ausentes:');
     missing.forEach((f) => console.error(`   • ${f}`));
-    console.error('\nVerifique se todos os blocos foram criados em src/\n');
+    console.error('\nVerifique se todos os arquivos foram criados em src/\n');
     process.exit(1);
   }
 
@@ -186,7 +183,7 @@ function bundle() {
 
   // ── 1. JS → .gs ────────────────────────────────────────────────────
   console.log('📝 Processando arquivos JS:');
-  BUNDLE_ORDER.forEach(([, srcRelative, distName]) => {
+  BUNDLE_ORDER.forEach(([srcRelative, distName]) => {
     const srcPath = path.join(SRC_DIR, srcRelative);
     const distPath = path.join(DIST_DIR, distName);
     try {
@@ -197,7 +194,7 @@ function bundle() {
       successCount++;
     } catch (err) {
       console.error(`  ✗ ${srcRelative.padEnd(45)} → ERRO: ${err.message}`);
-      errors.push({file: srcRelative, error: err.message});
+      errors.push({ file: srcRelative, error: err.message });
     }
   });
 
@@ -212,7 +209,7 @@ function bundle() {
       successCount++;
     } catch (err) {
       console.error(`  ✗ ${srcRelative.padEnd(45)} → ERRO: ${err.message}`);
-      errors.push({file: srcRelative, error: err.message});
+      errors.push({ file: srcRelative, error: err.message });
     }
   });
 
@@ -227,7 +224,7 @@ function bundle() {
       successCount++;
     } catch (err) {
       console.error(`  ✗ ${fileName} → ERRO: ${err.message}`);
-      errors.push({file: fileName, error: err.message});
+      errors.push({ file: fileName, error: err.message });
     }
   });
 
@@ -236,13 +233,13 @@ function bundle() {
     version,
     generatedAt: new Date().toISOString(),
     nodeVersion: process.version,
-    files: BUNDLE_ORDER.map(([, src, dist]) => ({src, dist})),
-    htmlFiles: HTML_FILES.map(([src, dist]) => ({src, dist})),
+    files: BUNDLE_ORDER.map(([src, dist]) => ({ src, dist })),
+    htmlFiles: HTML_FILES.map(([src, dist]) => ({ src, dist })),
   };
   fs.writeFileSync(
-      path.join(DIST_DIR, 'bundle-manifest.json'),
-      JSON.stringify(manifest, null, 2),
-      'utf8',
+    path.join(DIST_DIR, 'bundle-manifest.json'),
+    JSON.stringify(manifest, null, 2),
+    'utf8',
   );
 
   // ── 5. Relatório ───────────────────────────────────────────────────
@@ -254,7 +251,7 @@ function bundle() {
     process.exit(0);
   } else {
     console.error(`\n❌ Bundle com erros: ${errors.length} falha(s)`);
-    errors.forEach(({file, error}) => {
+    errors.forEach(({ file, error }) => {
       console.error(`   • ${file}: ${error}`);
     });
     process.exit(1);

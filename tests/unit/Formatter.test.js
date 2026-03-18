@@ -5,11 +5,7 @@
 
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-eval(fs.readFileSync(
-    path.join(__dirname, '../../src/utils/Formatter.js'), 'utf8'
-));
+const { Formatter } = require('../../src/utils/Formatter');
 
 describe('Formatter', () => {
 
@@ -43,14 +39,12 @@ describe('Formatter', () => {
                 ['123456789', '9 dígitos — retorna raw'],
                 ['55119123456789', '14 dígitos (DDI + número) — retorna raw'],
             ])('%s — %s', (input) => {
-                // Não deve lançar erro — apenas retornar o que veio
                 expect(() => Formatter.phone(input)).not.toThrow();
                 expect(Formatter.phone(input)).toBe(input);
             });
         });
 
         test('entrada com máscara: remove máscara antes de formatar', () => {
-            // O Formatter recebe dígitos puros — mas testa defensivamente
             expect(Formatter.phone('(11) 91234-5678')).toBe('(11) 91234-5678');
         });
 
@@ -71,7 +65,7 @@ describe('Formatter', () => {
         describe('CPF', () => {
             test.each([
                 ['52998224725', '529.982.247-25'],
-                ['01234567890', '012.345.678-90'], // zero à esquerda preservado na máscara
+                ['01234567890', '012.345.678-90'],
                 ['00000000191', '000.000.001-91'],
             ])('%s → %s', (doc, expected) => {
                 expect(Formatter.document(doc, 'CPF')).toBe(expected);
@@ -108,7 +102,7 @@ describe('Formatter', () => {
             ['', ''],
             [null, ''],
             [undefined, ''],
-            [12345, '12345'], // número como input
+            [12345, '12345'],
         ])('"%s" → "%s"', (input, expected) => {
             expect(Formatter.digitsOnly(input)).toBe(expected);
         });

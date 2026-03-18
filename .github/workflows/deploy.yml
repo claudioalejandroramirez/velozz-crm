@@ -164,7 +164,7 @@ jobs:
     needs: bundle
     environment:
       name: production
-      url: "https://script.google.com/d/${{ secrets.SCRIPT_ID }}/edit"
+      url: "https://script.google.com/d/${{ SCRIPT_ID }}/edit"
 
     steps:
       - name: Checkout

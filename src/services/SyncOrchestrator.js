@@ -1,44 +1,9 @@
 /**
- * @fileoverview Orquestrador dos fluxos de sincronização bidirecional.
- *
- * DECISÃO DE ARQUITETURA — POR QUE ESTE ARQUIVO EXISTE:
- * TriggerHandlers.js deve conter APENAS as funções globais exigidas pelo
- * GAS (onOpen, onEdit, onFormSubmit). Toda lógica de negócio que antes
- * estava em syncPlanilhaParaContatos() e syncContatosParaPlanilha() foi
- * movida para cá, onde pode ser testada sem depender de triggers reais.
- *
- * FLUXO A — processarNovoContato():
- *   Forms → Sheets (já feito pelo Forms) → Contacts
- *   Deduplicação + criação de contato + tags PF/PJ + alerta se DOC inválido
- *
- * FLUXO B — syncPlanilhaParaContatos():
- *   onEdit → detectar mudança → atualizar Contacts
- *   Tags temporárias se telefone ou email mudou
- *
- * FLUXO C — syncContatosParaPlanilha():
- *   time-based → buscar contatos alterados → atualizar planilha
- *   Correção de DOC pelo operador + tags temporárias
- *
- * ⚠️ GAS RUNTIME: todos os métodos públicos devem ser chamados dentro
- * de LockManager.withLock() quando houver risco de execução paralela.
- * O lock é aplicado em TriggerHandlers, não aqui — SyncOrchestrator
- * não tem conhecimento de concorrência (Single Responsibility).
+ * @fileoverview Orquestrador dos fluxos de sincronização.
+ * Centraliza a lógica de negócio dos MÓDULOS 5, 6 e 7.
  */
 class SyncOrchestrator {
-  /**
-     * @param {AppConfig} appConfig
-     * @param {Logger} logger
-     * @param {SheetService} sheetService
-     * @param {FormService} formService
-     * @param {ContactService} contactService
-     * @param {TagService} tagService
-     * @param {DocumentValidator} validator
-     * @param {Formatter} formatter
-     */
-  constructor(
-      appConfig, logger, sheetService, formService,
-      contactService, tagService, validator, formatter,
-  ) {
+  constructor(appConfig, logger, sheetService, formService, contactService, tagService, validator, formatter) {
     this._config = appConfig;
     this._logger = logger;
     this._sheets = sheetService;
@@ -49,434 +14,300 @@ class SyncOrchestrator {
     this._formatter = formatter;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // FLUXO A: FORMS → SHEETS → CONTACTS (onFormSubmit)
-  // ═══════════════════════════════════════════════════════════════════════
+  // --- FLUXO: Forms → Sheets → Contacts (MÓDULO 5) ---
+  processarNovoContato(e, tipo) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const valores = e.values;
+    const sheetDestino = tipo === 'Pessoa Física' ? this._sheets.getSheetPF() : this._sheets.getSheetPJ();
 
-  /**
-     * Processa uma nova resposta de formulário.
-     * 1. Valida a estrutura do evento
-     * 2. Verifica duplicidade por DOC
-     * 3. Cria o contato no Google Contacts
-     * 4. Aplica tags e envia alerta se DOC inválido
-     *
-     * 📋 FORMS: e.namedValues é a fonte primária de dados.
-     * A aba de destino já recebeu a linha do Forms antes deste método
-     * ser chamado — o script apenas COMPLEMENTA com Status, ResourceName
-     * e Última Atualização.
-     *
-     * @param {Object} formEvent - Evento onFormSubmit (e)
-     * @param {'PF'|'PJ'} tipo - Tipo identificado da resposta
-     * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - Aba de destino
-     * @param {number} newRow - Número da linha recém-inserida pelo Forms
-     */
-  processNewContact(formEvent, tipo, sheet, newRow) {
-    const headers = this._config.config.headers;
-
-    // 1. Valida estrutura do evento antes de qualquer chamada à API
-    const {valid, missingKeys} = this._forms.validateFormEvent(formEvent, tipo);
-    if (!valid) {
-      this._sheets.setCellByHeader(
-          sheet, newRow, headers.status,
-          `Erro: campos ausentes no formulário [${missingKeys.join(', ')}]`,
-      );
+    if (!sheetDestino) {
+      this._logger.error('SyncOrchestrator.processarNovoContato', `Aba destino para ${tipo} não encontrada.`);
       return;
     }
 
-    const dados = this._forms.extractFormData(formEvent, tipo);
-    const docHeader = tipo === 'PF' ? headers.docPF : headers.docPJ;
+    const dados = this._forms.extrairDadosFormulario(valores, tipo);
 
-    // 2. Deduplicação por DOC
+    // 1. Deduplicação
     if (dados.documentoLimpo) {
-      const {found, row: dupRow} = this._sheets.findDuplicateDoc(
-          sheet, dados.documentoLimpo, docHeader,
-      );
-      // Ignora a própria linha recém-inserida pelo Forms
-      if (found && dupRow !== newRow) {
-        this._sheets.setCellByHeader(
-            sheet, newRow, headers.status,
-            `Duplicado: DOC já cadastrado na linha ${dupRow}`,
-        );
-        this._logger.warn(
-            'SyncOrchestrator.processNewContact',
-            `Duplicado: ${dados.documentoLimpo} já existe na linha ${dupRow}`,
-        );
+      const duplicado = this._sheets.verificarDuplicidadeDoc(sheetDestino, dados.documentoLimpo);
+      if (duplicado.encontrado) {
+        const statusDuplicado = `Duplicado: DOC já cadastrado na linha ${duplicado.linha}`;
+        this._sheets.escreverNovaLinha(sheetDestino, dados, tipo, statusDuplicado);
+        this._logger.warn('SyncOrchestrator.processarNovoContato',
+          `Duplicado: ${dados.documentoLimpo} já existe na linha ${duplicado.linha}`);
         return;
       }
     }
 
-    // 3. Marca como "Processando..." antes de chamar a API (feedback imediato)
-    this._sheets.setCellByHeader(sheet, newRow, headers.status, 'Processando...');
+    // 2. Escreve linha com status "Processando..."
+    const novaLinha = this._sheets.escreverNovaLinha(sheetDestino, dados, tipo, 'Processando...');
+    const statusCell = sheetDestino.getRange(novaLinha, this._config.config.colunaStatus);
 
+    // 3. Cria contato
     try {
-      const payload = this._forms.buildContactPayload(dados);
-      const newContact = this._contacts.create(payload);
-      const resourceName = newContact.resourceName;
+      const payload = this._forms.montarObjetoPessoa(dados);
+      const novoContato = this._contacts.createContact(payload);
+      const resourceName = novoContato.resourceName;
 
-      // 4. Tags: PF/PJ obrigatória + 'revisar' se DOC inválido
-      this._tags.apply(resourceName, tipo);
+      // 4. Aplica tags
+      this._contacts.aplicarTag(resourceName, tipo === 'Pessoa Física' ? 'PF' : 'PJ');
       if (!dados.isValid && dados.documentoLimpo) {
-        this._tags.apply(resourceName, this._config.config.tagAlertName);
-        this._sendInvalidDocAlert(dados);
+        this._contacts.aplicarTag(resourceName, this._config.getTagAlerta());
+        this._enviarAlertaEmail(dados);
       }
 
-      // Escreve colunas do script (não existem no Forms)
-      this._sheets.setCellByHeader(
-          sheet, newRow, headers.resourceName, resourceName,
-      );
-      this._sheets.setCellByHeader(
-          sheet, newRow, headers.ultimaAtualizacao, new Date(),
-      );
-      this._sheets.setCellByHeader(
-          sheet, newRow, headers.status,
-                dados.isValid ? 'Sincronizado' : 'Sincronizado (Alerta: DOC Inválido)',
-      );
+      // 5. Atualiza planilha
+      this._sheets.setResourceName(sheetDestino, novaLinha, resourceName);
+      this._sheets.setSyncTimestamp(sheetDestino, novaLinha);
+      const statusFinal = dados.isValid ? 'Sincronizado' : 'Sincronizado (Alerta: DOC Inválido)';
+      this._sheets.setStatus(sheetDestino, novaLinha, statusFinal);
 
-      this._logger.info(
-          'SyncOrchestrator.processNewContact',
-          `Contato criado: ${dados.nome} | DOC: ${dados.documentoLimpo} | ` +
-                `Válido: ${dados.isValid} | ResourceName: ${resourceName}`,
-      );
+      this._logger.info('SyncOrchestrator.processarNovoContato',
+        `Contato criado: ${dados.nome} | DOC: ${dados.documentoLimpo} | Válido: ${dados.isValid}`);
     } catch (error) {
-      this._sheets.setCellByHeader(
-          sheet, newRow, headers.status, `Erro API: ${error.message}`,
-      );
-      this._logger.error(
-          'SyncOrchestrator.processNewContact',
-          `Erro ao criar contato: ${error.message}`,
-      );
+      this._sheets.setStatus(sheetDestino, novaLinha, 'Erro API: ' + error.message);
+      this._logger.error('SyncOrchestrator.processarNovoContato', 'Erro API: ' + error.message);
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // FLUXO B: SHEETS → CONTACTS (onEdit)
-  // ═══════════════════════════════════════════════════════════════════════
+  // --- FLUXO: Sheets → Contacts (onEdit - MÓDULO 6) ---
+  syncPlanilhaParaContatos(e) {
+    if (!e || !e.range) return;
 
-  /**
-     * Sincroniza uma edição na planilha para o Google Contacts.
-     * Detecta mudanças de telefone e email para aplicar tags temporárias.
-     *
-     * ⚠️ BUG FIX (original): este método só é chamado se a coluna editada
-     * for menor que COLUNA_RESOURCE — prevenindo o loop de sync.
-     * Esse filtro é aplicado em TriggerHandlers antes de chamar este método.
-     *
-     * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - Aba editada
-     * @param {number} row - Linha editada
-     * @param {'PF'|'PJ'} tipo - Tipo da aba
-     * @param {string} resourceName - ID do contato na linha
-     */
-  syncSheetToContacts(sheet, row, tipo, resourceName) {
-    const headers = this._config.config.headers;
-    const statusExtras = [];
+    const sheet = e.range.getSheet();
+    const sheetName = sheet.getName();
+    const cfg = this._config.config;
+    if (sheetName !== cfg.abaPF && sheetName !== cfg.abaPJ) return;
+
+    const row = e.range.getRow();
+    if (row === 1) return;
+
+    // BUG 2 FIX: bloqueia loop quando o próprio script edita colunas gerenciadas.
+    const col = e.range.getColumn();
+    if (col >= cfg.colunaResource) return;
+
+    const resourceName = this._sheets.getResourceName(sheet, row);
+    if (!resourceName) return;
 
     try {
-      // Busca contato atual para comparação de tel/email e etag
-      const currentContact = this._contacts.get(resourceName);
-      const dados = this._forms.extractRowData(sheet, row, tipo);
+      // Busca contato atual e dados da linha
+      const contatoAtual = this._contacts.getContact(resourceName);
+      const valoresLinha = this._sheets.getDadosLinha(sheet, row);
+      const tipo = sheetName === cfg.abaPF ? 'Pessoa Física' : 'Pessoa Jurídica';
 
-      // ── Detecção de mudança de telefone ──────────────────────────────
-      const phoneInContacts = this._contacts.extractPhone(currentContact);
-      if (TagService.phoneChanged(dados.telefoneLimpo, phoneInContacts)) {
-        this._tags.applyTemporary(
-            resourceName, this._config.config.tagPhoneName,
-        );
+      // Reconstrói objeto 'dados' para ter a mesma estrutura do FormService
+      const dados = this._reconstruirDadosDeLinha(valoresLinha, tipo);
+      dados.documentoLimpo = this._sheets.getDocLinha(sheet, row);
+      dados.isValid = (tipo === 'Pessoa Física')
+        ? this._validator.validarCPF(dados.documentoLimpo)
+        : this._validator.validarCNPJ(dados.documentoLimpo);
+
+      const statusExtras = [];
+
+      // Detecção de mudança de telefone
+      const telNoContato = this._formatter.apenasDigitos(contatoAtual.phoneNumbers?.[0]?.value);
+      if (telNoContato && dados.telefoneLimpo && telNoContato !== dados.telefoneLimpo) {
+        this._tags.aplicarTagTemporaria(resourceName, this._config.getTagNovoTelefone());
         statusExtras.push('📞 novo-telefone');
-        this._logger.info(
-            'SyncOrchestrator.syncSheetToContacts',
-            `Telefone alterado linha ${row}: ${phoneInContacts} → ${dados.telefoneLimpo}`,
-        );
+        this._logger.info('SyncOrchestrator.syncPlanilhaParaContatos',
+          `Telefone alterado linha ${row}: ${telNoContato} → ${dados.telefoneLimpo}`);
       }
 
-      // ── Detecção de mudança de email ──────────────────────────────────
-      const emailInContacts = this._contacts.extractEmail(currentContact);
-      if (TagService.emailChanged(dados.email, emailInContacts)) {
-        this._tags.applyTemporary(
-            resourceName, this._config.config.tagEmailName,
-        );
+      // Detecção de mudança de email
+      const emailNoContato = this._formatter.normalizarEmail(contatoAtual.emailAddresses?.[0]?.value);
+      if (emailNoContato && dados.email && emailNoContato !== dados.email) {
+        this._tags.aplicarTagTemporaria(resourceName, this._config.getTagNovoEmail());
         statusExtras.push('✉️ novo-email');
-        this._logger.info(
-            'SyncOrchestrator.syncSheetToContacts',
-            `Email alterado linha ${row}: ${emailInContacts} → ${dados.email}`,
-        );
+        this._logger.info('SyncOrchestrator.syncPlanilhaParaContatos',
+          `Email alterado linha ${row}: ${emailNoContato} → ${dados.email}`);
       }
 
-      // ── Atualiza o contato ────────────────────────────────────────────
-      const payload = this._forms.buildContactPayload(dados);
-      payload.etag = currentContact.etag;
-      this._contacts.update(payload, resourceName);
+      // Atualiza contato
+      const payload = this._forms.montarObjetoPessoa(dados);
+      payload.etag = contatoAtual.etag;
+      this._contacts.updateContact(payload, resourceName);
 
-      // Remove tag 'revisar' se DOC agora é válido
       if (dados.isValid) {
-        this._tags.remove(resourceName, this._config.config.tagAlertName);
+        this._contacts.removerTag(resourceName, this._config.getTagAlerta());
       }
 
-      // Atualiza colunas do script
-      this._sheets.setCellByHeader(
-          sheet, row, headers.ultimaAtualizacao, new Date(),
-      );
-      const statusMsg = statusExtras.length > 0 ?
-                `Edição Sincronizada (Planilha → Contacts) | ${statusExtras.join(' | ')}` :
-                'Edição Sincronizada (Planilha → Contacts)';
-      this._sheets.setCellByHeader(sheet, row, headers.status, statusMsg);
+      // Atualiza planilha
+      this._sheets.setSyncTimestamp(sheet, row);
+      const statusFinal = statusExtras.length > 0
+        ? `Edição Sincronizada (Planilha → Contacts) | ${statusExtras.join(' | ')}`
+        : 'Edição Sincronizada (Planilha → Contacts)';
+      this._sheets.setStatus(sheet, row, statusFinal);
 
-      this._logger.info(
-          'SyncOrchestrator.syncSheetToContacts',
-          `Linha ${row} → Contacts OK. ${statusExtras.join(', ') || 'Sem mudanças de contato'}`,
-      );
+      this._logger.info('SyncOrchestrator.syncPlanilhaParaContatos',
+        `Linha ${row} sincronizada. ${statusExtras.join(', ')}`);
     } catch (error) {
-      this._sheets.setCellByHeader(
-          sheet, row, headers.status, `Erro Sync: ${error.message}`,
-      );
-      this._logger.error(
-          'SyncOrchestrator.syncSheetToContacts',
-          `Erro na linha ${row}: ${error.message}`,
-      );
+      this._sheets.setStatus(sheet, row, 'Erro Sync: ' + error.message);
+      this._logger.error('SyncOrchestrator.syncPlanilhaParaContatos', `Erro na linha ${row}: ${error.message}`);
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // FLUXO C: CONTACTS → SHEETS (time-based)
-  // ═══════════════════════════════════════════════════════════════════════
+  // --- FLUXO: Contacts → Sheets (time-based - MÓDULO 7) ---
+  syncContatosParaPlanilha() {
+    const syncToken = this._contacts.getSyncToken();
+    let processedCount = 0;
 
-  /**
-     * Processa todos os contatos alterados desde o último sync.
-     * Para cada contato alterado:
-     *   A. Processa DOC (correção do operador ou normalização)
-     *   B. Detecta mudança de telefone
-     *   C. Detecta mudança de email
-     *
-     * @return {number} Quantidade de contatos processados
-     */
-  syncContactsToSheet() {
-    const {isFirstRun, connections} = this._contacts.getModifiedContacts();
-    if (isFirstRun || connections.length === 0) return 0;
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let processed = 0;
-
-    connections.forEach((contact) => {
-      try {
-        this._processSingleContactSync(contact, ss);
-        processed++;
-      } catch (error) {
-        this._logger.error(
-            'SyncOrchestrator.syncContactsToSheet',
-            `Erro ao processar ${contact.resourceName}: ${error.message}`,
-        );
+    try {
+      const response = this._contacts.listConnections(syncToken);
+      if (response.nextSyncToken) {
+        this._contacts.setSyncToken(response.nextSyncToken);
       }
-    });
 
-    return processed;
+      if (!syncToken) {
+        this._logger.info('SyncOrchestrator.syncContatosParaPlanilha', 'Primeira execução: Sync Token gerado.');
+        return 0;
+      }
+      if (!response.connections || response.connections.length === 0) return 0;
+
+      response.connections.forEach(contato => {
+        const { sheet, row } = this._sheets.encontrarLinhaPorResourceName(contato.resourceName);
+        if (!sheet || !row) return; // Contato não pertence ao sistema
+
+        const mudancas = [];
+        const resourceName = contato.resourceName;
+        const cfg = this._config.config;
+
+        // --- Processar DOC (Biography) ---
+        const noteAtual = contato.biographies?.[0]?.value?.trim() || '';
+        if (noteAtual) {
+          this._processarBiography(contato, sheet, row, noteAtual, mudancas);
+        }
+
+        // --- Detectar mudança de Telefone ---
+        const telNaPlanilha = this._sheets.getTelefoneLinha(sheet, row);
+        const telNoContato = this._formatter.apenasDigitos(contato.phoneNumbers?.[0]?.value);
+        if (telNaPlanilha && telNoContato && telNaPlanilha !== telNoContato) {
+          this._sheets.setTelefoneLinha(sheet, row, this._formatter.telefone(telNoContato));
+          this._tags.aplicarTagTemporaria(resourceName, cfg.tagNovoTelefone);
+          mudancas.push('📞 Telefone Atualizado');
+          this._logger.info('SyncOrchestrator.syncContatosParaPlanilha',
+            `Telefone: ${resourceName} | ${telNaPlanilha} → ${telNoContato}`);
+        }
+
+        // --- Detectar mudança de Email ---
+        const emailNaPlanilha = this._formatter.normalizarEmail(this._sheets.getEmailLinha(sheet, row));
+        const emailNoContato = this._formatter.normalizarEmail(contato.emailAddresses?.[0]?.value);
+        if (emailNaPlanilha && emailNoContato && emailNaPlanilha !== emailNoContato) {
+          this._sheets.setEmailLinha(sheet, row, contato.emailAddresses[0].value); // Usa o valor original
+          this._tags.aplicarTagTemporaria(resourceName, cfg.tagNovoEmail);
+          mudancas.push('✉️ Email Atualizado');
+          this._logger.info('SyncOrchestrator.syncContatosParaPlanilha',
+            `Email: ${resourceName} | ${emailNaPlanilha} → ${emailNoContato}`);
+        }
+
+        if (mudancas.length > 0) {
+          this._sheets.setStatus(sheet, row, mudancas.join(' | ') + ' (Contacts → Planilha)');
+          this._sheets.setSyncTimestamp(sheet, row);
+          processedCount++;
+        }
+      });
+
+    } catch (error) {
+      this._logger.error('SyncOrchestrator.syncContatosParaPlanilha', 'Erro no Sync Reverso: ' + error.message);
+    }
+    return processedCount;
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // PRIVADO
-  // ─────────────────────────────────────────────────────────────────────
+  // --- Helpers Privados ---
 
-  /**
-     * Processa a sincronização de um único contato alterado.
-     * @private
-     * @param {Object} contact - Objeto contato da People API
-     * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
-     */
-  _processSingleContactSync(contact, ss) {
-    const resourceName = contact.resourceName;
-    const headers = this._config.config.headers;
-
-    // Localiza a linha do contato nas abas PF e PJ
-    const {sheet, row} = this._findContactRow(resourceName, ss);
-    if (!sheet || !row) return; // Contato não pertence ao sistema
-
-    const tipo = sheet.getName() === this._config.config.sheetPF ? 'PF' : 'PJ';
-    const mudancas = [];
-
-    // ── PASSO A: DOC (campo biography) ───────────────────────────────────
-    const bio = this._contacts.extractBiography(contact);
-    if (bio) {
-      this._processBiographySync(contact, sheet, row, tipo, bio, mudancas);
+  _reconstruirDadosDeLinha(valoresLinha, tipo) {
+    // Esta função é um espelho de extrairDadosFormulario, mas para uma linha da planilha.
+    // A ordem dos valoresLinha é: [Data, Nome, (Sobrenome|Empresa), Documento, Endereço, Número, Complemento, Telefone, Email]
+    const dados = { tipo };
+    if (tipo === 'Pessoa Física') {
+      dados.nome = valoresLinha[1] || '';
+      dados.sobrenome = valoresLinha[2] || '';
+      dados.empresa = '';
+      dados.docTipo = 'CPF';
+    } else {
+      dados.nome = valoresLinha[1] || ''; // Nome Responsável
+      dados.sobrenome = ''; // Sobrenome não usado na PJ
+      dados.empresa = valoresLinha[2] || '';
+      dados.docTipo = 'CNPJ';
     }
-
-    // ── PASSO B: Telefone ─────────────────────────────────────────────────
-    const phoneInSheet = (
-      this._sheets.getCellByHeader(sheet, row, headers.telefone) || ''
-    ).toString().replace(/\D/g, '');
-    const phoneInContacts = this._contacts.extractPhone(contact);
-
-    if (TagService.phoneChanged(phoneInSheet, phoneInContacts)) {
-      this._sheets.setCellByHeader(
-          sheet, row, headers.telefone,
-          this._formatter.phone(phoneInContacts),
-      );
-      this._tags.applyTemporary(resourceName, this._config.config.tagPhoneName);
-      mudancas.push('📞 Telefone Atualizado');
-      this._logger.info(
-          'SyncOrchestrator._processSingleContactSync',
-          `Telefone: ${resourceName} | ${phoneInSheet} → ${phoneInContacts}`,
-      );
-    }
-
-    // ── PASSO C: Email ────────────────────────────────────────────────────
-    const emailInSheet = (
-      this._sheets.getCellByHeader(sheet, row, headers.email) || ''
-    ).toString().toLowerCase().trim();
-    const emailInContacts = this._contacts.extractEmail(contact);
-
-    if (TagService.emailChanged(emailInSheet, emailInContacts)) {
-      this._sheets.setCellByHeader(sheet, row, headers.email, emailInContacts);
-      this._tags.applyTemporary(resourceName, this._config.config.tagEmailName);
-      mudancas.push('✉️ Email Atualizado');
-      this._logger.info(
-          'SyncOrchestrator._processSingleContactSync',
-          `Email: ${resourceName} | ${emailInSheet} → ${emailInContacts}`,
-      );
-    }
-
-    // Atualiza status e timestamp apenas se houve mudança real
-    if (mudancas.length > 0) {
-      this._sheets.setCellByHeader(
-          sheet, row, headers.status,
-          `${mudancas.join(' | ')} (Contacts → Planilha)`,
-      );
-      this._sheets.setCellByHeader(
-          sheet, row, headers.ultimaAtualizacao, new Date(),
-      );
-    }
+    dados.logradouro = valoresLinha[4] || '';
+    dados.numero = valoresLinha[5] || '';
+    dados.complemento = valoresLinha[6] || '';
+    dados.telefoneLimpo = this._formatter.apenasDigitos(valoresLinha[7]);
+    dados.email = valoresLinha[8] || '';
+    return dados;
   }
 
-  /**
-     * Processa o campo biography de um contato alterado.
-     * Detecta se é correção do operador (só dígitos) ou sync normal.
-     * @private
-     */
-  _processBiographySync(contact, sheet, row, tipo, bio, mudancas) {
-    const headers = this._config.config.headers;
-    const docHeader = tipo === 'PF' ?
-            headers.docPF :
-            headers.docPJ;
+  _processarBiography(contato, sheet, row, noteAtual, mudancas) {
+    const resourceName = contato.resourceName;
+    const cfg = this._config.config;
+    const docExtraido = this._formatter.apenasDigitos(noteAtual);
+    const temPrefixo = /^(CPF|CNPJ)\s*:/i.test(noteAtual);
+    const tamanhoValido = docExtraido.length === 11 || docExtraido.length === 14;
 
-    // Correção do operador: campo contém apenas dígitos sem prefixo
-    if (this._validator.isOperatorCorrection(bio)) {
-      const result = this._validator.identify(bio);
+    // Modo Correção do Operador
+    if (!temPrefixo && tamanhoValido) {
+      let tipoDoc = null, isValido = false;
+      if (this._validator.validarCPF(docExtraido)) { tipoDoc = 'CPF'; isValido = true; }
+      else if (this._validator.validarCNPJ(docExtraido)) { tipoDoc = 'CNPJ'; isValido = true; }
 
-      if (result.valid) {
-        // ✅ DOC válido após correção
-        const formatted = this._formatter.document(result.digits, result.type);
-
-        this._sheets.setCellByHeader(
-            sheet, row, docHeader, result.digits, true, // forceText: preserva zero
-        );
-        this._contacts.updateBiography(
-            contact.resourceName,
-            contact.etag,
-            `${result.type}: ${formatted}`,
-        );
-        this._tags.remove(contact.resourceName, this._config.config.tagAlertName);
+      if (isValido) {
+        const docFormatado = this._formatter.documento(docExtraido, tipoDoc);
+        this._sheets.setDocLinha(sheet, row, docExtraido);
+        this._contacts.updateBiography(resourceName, contato.etag, `${tipoDoc}: ${docFormatado}`);
+        this._contacts.removerTag(resourceName, cfg.tagAlerta);
         mudancas.push('✅ Corrigido pelo Operador');
-        this._sheets.setCellByHeader(
-            sheet, row, headers.status, 'Corrigido pelo Operador',
-        );
-        this._logger.info(
-            'SyncOrchestrator._processBiographySync',
-            `DOC corrigido: ${contact.resourceName} → ${formatted}`,
-        );
+        this._logger.info('SyncOrchestrator._processarBiography',
+          `DOC corrigido pelo operador: ${resourceName} → ${docFormatado}`);
       } else {
-        // ⚠️ Operador digitou número mas ainda inválido matematicamente
-        const inferredType = result.digits.length === 11 ? 'CPF' : 'CNPJ';
-        this._contacts.updateBiography(
-            contact.resourceName,
-            contact.etag,
-            `${inferredType}: ${result.digits} [INVÁLIDO]`,
-        );
-        this._tags.apply(contact.resourceName, this._config.config.tagAlertName);
-        this._sendInvalidDocAlert({
-          nome: this._contacts.extractFullName(contact),
-          docTipo: inferredType,
-          documentoLimpo: result.digits,
+        const tipoInferido = docExtraido.length === 11 ? 'CPF' : 'CNPJ';
+        this._contacts.updateBiography(resourceName, contato.etag, `${tipoInferido}: ${docExtraido} [INVÁLIDO]`);
+        this._contacts.aplicarTag(resourceName, cfg.tagAlerta);
+        this._enviarAlertaEmail({
+          nome: contato.names?.[0] ? `${contato.names[0].givenName || ''} ${contato.names[0].familyName || ''}`.trim() : 'Desconhecido',
+          docTipo: tipoInferido,
+          documentoLimpo: docExtraido,
           telefoneLimpo: '',
-          email: '',
+          email: ''
         });
         mudancas.push('⚠️ Correção Falhou: DOC ainda inválido');
-        this._sheets.setCellByHeader(
-            sheet, row, headers.status,
-            'Correção Falhou: DOC ainda inválido',
-        );
-        this._logger.warn(
-            'SyncOrchestrator._processBiographySync',
-            `Correção falhou: ${contact.resourceName} → ${result.digits}`,
-        );
+        this._logger.warn('SyncOrchestrator._processarBiography',
+          `Correção falhou: ${resourceName} → ${docExtraido} inválido`);
       }
     } else {
-      // Sync normal: biography já tem prefixo "CPF:" ou "CNPJ:"
-      const result = this._validator.identify(bio);
-      if (result.valid) {
-        const formatted = this._formatter.document(result.digits, result.type);
-        // BUG FIX: forceText=true preserva zeros à esquerda (CPF 086...)
-        this._sheets.setCellByHeader(
-            sheet, row, docHeader, result.digits, true,
-        );
-        this._contacts.updateBiography(
-            contact.resourceName,
-            contact.etag,
-            `${result.type}: ${formatted}`,
-        );
-        this._tags.remove(contact.resourceName, this._config.config.tagAlertName);
+      // Modo Normal: Extrai e valida DOC da biografia formatada
+      let tipoDoc = null, isValido = false;
+      if (this._validator.validarCPF(docExtraido)) { tipoDoc = 'CPF'; isValido = true; }
+      else if (this._validator.validarCNPJ(docExtraido)) { tipoDoc = 'CNPJ'; isValido = true; }
+
+      if (isValido) {
+        const docFormatado = this._formatter.documento(docExtraido, tipoDoc);
+        this._sheets.setDocLinha(sheet, row, docExtraido);
+        this._contacts.updateBiography(resourceName, contato.etag, `${tipoDoc}: ${docFormatado}`);
+        this._contacts.removerTag(resourceName, cfg.tagAlerta);
         mudancas.push('DOC sincronizado');
-        this._logger.info(
-            'SyncOrchestrator._processBiographySync',
-            `DOC normalizado: ${contact.resourceName} → ${formatted}`,
-        );
+        this._logger.info('SyncOrchestrator._processarBiography',
+          `DOC normalizado: ${resourceName} → ${docFormatado}`);
       }
     }
   }
 
-  /**
-     * Localiza a linha de um contato pelo resourceName nas abas PF e PJ.
-     * @private
-     * @param {string} resourceName
-     * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
-     * @returns {{ sheet: Sheet|null, row: number|null }}
-     */
-  _findContactRow(resourceName, ss) {
-    const sheetNames = [
-      this._config.config.sheetPF,
-      this._config.config.sheetPJ,
-    ];
-
-    for (const name of sheetNames) {
-      const sheet = ss.getSheetByName(name);
-      if (!sheet) continue;
-      const row = this._sheets.findRowByResourceName(sheet, resourceName);
-      if (row) return {sheet, row};
-    }
-
-    return {sheet: null, row: null};
-  }
-
-  /**
-     * Envia e-mail de alerta para DOC inválido.
-     * @private
-     * @param {Object} dados - Dados do contato com DOC inválido
-     */
-  _sendInvalidDocAlert(dados) {
+  _enviarAlertaEmail(dados) {
     try {
-      const alertEmail = this._config.config.alertEmail;
-      const subject =
-                `⚠️ [${this._config.config.companyName}] Lead Inválido: ` +
-                `Revisar ${dados.docTipo} de ${dados.nome}`;
-      const body =
-                `O cliente ${dados.nome} possui um ${dados.docTipo} inválido.\n\n` +
-                `DOC Informado: ${dados.documentoLimpo || 'Vazio'}\n` +
-                `Telefone: ${this._formatter.phone(dados.telefoneLimpo) || 'Não informado'}\n` +
-                `E-mail: ${dados.email || 'Não informado'}\n\n` +
-                `O contato está com a tag '${this._config.config.tagAlertName}' ` +
-                `no Google Contacts.\n\n` +
-                `— Velozz CRM`;
-      MailApp.sendEmail(alertEmail, subject, body);
+      const meuEmail = Session.getEffectiveUser().getEmail();
+      const assunto = `⚠️ Lead Inválido: Revisar DOC de ${dados.nome}`;
+      const corpo =
+        `O cliente ${dados.nome} possui um ${dados.docTipo} inválido (cadastro ou correção).\n\n` +
+        `DOC Informado: ${dados.documentoLimpo || 'Vazio'}\n` +
+        `Telefone: ${this._formatter.telefone(dados.telefoneLimpo) || 'Não informado'}\n` +
+        `E-mail: ${dados.email || 'Não informado'}\n\n` +
+        `O contato está com a tag '${this._config.getTagAlerta()}' no Google Contacts.`;
+      MailApp.sendEmail(meuEmail, assunto, corpo);
     } catch (e) {
-      this._logger.error(
-          'SyncOrchestrator._sendInvalidDocAlert',
-          `Falha ao enviar e-mail de alerta: ${e.message}`,
-      );
+      this._logger.error('SyncOrchestrator._enviarAlertaEmail', `Falha ao enviar e-mail: ${e.message}`);
     }
   }
+}
+
+if (typeof module !== 'undefined') {
+  module.exports = SyncOrchestrator;
 }
